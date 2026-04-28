@@ -1,84 +1,94 @@
-<!--
-Get your module up and running quickly.
+# @mttzzz/nuxt-stale-deploy-guard
 
-Find and replace all on all files (CMD+SHIFT+F):
-- Name: My Module
-- Package name: my-module
-- Description: My new Nuxt module
--->
+Nuxt 4 module: Cache-Control headers + verify-before-reload chunk guard for SPA deploys.
 
-# My Module
+Решает проблему: SPA (`ssr: false`) после деплоя iOS Safari эвристически кеширует
+HTML, который ссылается на удалённые `/_nuxt/<hash>.js` чанки → 404 → белый экран.
 
-[![npm version][npm-version-src]][npm-version-href]
-[![npm downloads][npm-downloads-src]][npm-downloads-href]
-[![License][license-src]][license-href]
-[![Nuxt][nuxt-src]][nuxt-href]
-
-My new Nuxt module for doing amazing things.
-
-- [✨ &nbsp;Release Notes](/CHANGELOG.md)
-<!-- - [🏀 Online playground](https://stackblitz.com/github/your-org/my-module?file=playground%2Fapp.vue) -->
-<!-- - [📖 &nbsp;Documentation](https://example.com) -->
-
-## Features
-
-<!-- Highlight some of the features your module provide here -->
-- ⛰ &nbsp;Foo
-- 🚠 &nbsp;Bar
-- 🌲 &nbsp;Baz
-
-## Quick Setup
-
-Install the module to your Nuxt application with one command:
+## Установка
 
 ```bash
-npx nuxt module add my-module
+bun add github:mttzzz/nuxt-stale-deploy-guard#v0.1.0
 ```
 
-That's it! You can now use My Module in your Nuxt app ✨
+## Использование
 
+```ts
+// nuxt.config.ts
+export default defineNuxtConfig({
+  modules: ['@mttzzz/nuxt-stale-deploy-guard'],
+})
+```
 
-## Contribution
+С опциями:
 
-<details>
-  <summary>Local development</summary>
-  
-  ```bash
-  # Install dependencies
-  npm install
-  
-  # Generate type stubs
-  npm run dev:prepare
-  
-  # Develop with the playground
-  npm run dev
-  
-  # Build the playground
-  npm run dev:build
-  
-  # Run ESLint
-  npm run lint
-  
-  # Run Vitest
-  npm run test
-  npm run test:watch
-  
-  # Release new version
-  npm run release
-  ```
+```ts
+export default defineNuxtConfig({
+  modules: ['@mttzzz/nuxt-stale-deploy-guard'],
+  staleDeployGuard: {
+    buildIdHeader: 'x-app-build-id',
+    pollIntervalMs: 60_000,
+    apiPaths: ['/api/**'],
+  },
+})
+```
 
-</details>
+## Sentry filter (sub-export)
 
+```ts
+// app/plugins/sentry.client.ts
+import {
+  createSentryStaleChunkFilter,
+  STALE_CHUNK_PATTERNS,
+} from '@mttzzz/nuxt-stale-deploy-guard/sentry'
 
-<!-- Badges -->
-[npm-version-src]: https://img.shields.io/npm/v/my-module/latest.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-version-href]: https://npmjs.com/package/my-module
+Sentry.init({
+  ignoreErrors: [...STALE_CHUNK_PATTERNS],
+  beforeSend: createSentryStaleChunkFilter(),
+})
+```
 
-[npm-downloads-src]: https://img.shields.io/npm/dm/my-module.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-downloads-href]: https://npm.chart.dev/my-module
+Sub-export не тянет за собой `@sentry/*` — типы структурные, фильтр работает с любым
+event-shape, имеющим `breadcrumbs`.
 
-[license-src]: https://img.shields.io/npm/l/my-module.svg?style=flat&colorA=020420&colorB=00DC82
-[license-href]: https://npmjs.com/package/my-module
+## Что делает
 
-[nuxt-src]: https://img.shields.io/badge/Nuxt-020420?logo=nuxt
-[nuxt-href]: https://nuxt.com
+- Ставит `Cache-Control` headers через `routeRules`:
+  - `/**` → `no-cache, must-revalidate`
+  - `/_nuxt/**` → `public, max-age=31536000, immutable`
+  - `/api/**` → `no-store`
+  - `/service-worker.js` → `no-cache, no-store, must-revalidate`
+- Эмитит `x-app-build-id` header на каждый response (Nitro plugin).
+- Ловит `vite:preloadError`, `app:chunkError`, `vue:error`, `unhandledrejection`, `error` →
+  HEAD-запрос на текущий путь → если build-id отличается → reload через `reloadNuxtApp`.
+- Cooldown 10s + circuit breaker (3 попытки в 5 мин). Превышение — `dispatchEvent('app:chunk-reload-blocked')`.
+- Passive poll: `setInterval(pollIntervalMs)`, `online`, `visibilitychange`, `router.beforeEach`.
+
+## Опции
+
+| Опция | Default | Описание |
+|-------|---------|----------|
+| `buildIdHeader` | `'x-app-build-id'` | имя header'а с build-id |
+| `htmlPaths` | `['/**']` | пути с no-cache,must-revalidate |
+| `immutablePaths` | `['/_nuxt/**']` | immutable пути |
+| `apiPaths` | `['/api/**']` | no-store пути |
+| `serviceWorkerPath` | `'/service-worker.js'` | SW путь |
+| `pollIntervalMs` | `60_000` | passive poll, 0 = выкл |
+| `cooldownMs` | `10_000` | cooldown между verify |
+| `circuitBreaker` | `{maxAttempts:3, windowMs:300_000}` | защита от infinite reload |
+
+User-defined `routeRules` имеют приоритет над дефолтами модуля (через `defu(user, ours)`).
+
+## Разработка
+
+```bash
+bun install
+bun run dev:prepare    # генерит .nuxt/ и dist stub
+bun run dev            # playground на localhost:3000
+bun test               # 52 unit + e2e теста
+bun run prepack        # билд dist/ через @nuxt/module-builder
+```
+
+## License
+
+MIT
