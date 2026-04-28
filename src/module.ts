@@ -22,10 +22,24 @@ export default defineNuxtModule<ModuleOptions>({
     configKey: 'staleDeployGuard',
     compatibility: { nuxt: '^4.0.0' },
   },
-  defaults: DEFAULTS,
+  /*
+   * defaults пустой намеренно: defineNuxtModule(...defaults) применяет defu(user, defaults),
+   * а defu конкатенирует массивы (['/api/v2/**'] + ['/api/**']). Нам нужен replace на массивах,
+   * поэтому раскрываем дефолты вручную ниже через `??`.
+   */
+  defaults: {},
   setup(opts, nuxt) {
     const resolver = createResolver(import.meta.url)
-    const resolved = defu(opts, DEFAULTS) as ResolvedModuleOptions
+    const resolved: ResolvedModuleOptions = {
+      buildIdHeader: opts.buildIdHeader ?? DEFAULTS.buildIdHeader,
+      htmlPaths: opts.htmlPaths ?? DEFAULTS.htmlPaths,
+      immutablePaths: opts.immutablePaths ?? DEFAULTS.immutablePaths,
+      apiPaths: opts.apiPaths ?? DEFAULTS.apiPaths,
+      serviceWorkerPath: opts.serviceWorkerPath ?? DEFAULTS.serviceWorkerPath,
+      pollIntervalMs: opts.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
+      cooldownMs: opts.cooldownMs ?? DEFAULTS.cooldownMs,
+      circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker),
+    }
 
     /*
      * 1) routeRules: defu(user, ours) → user wins. Конкретные пути перекрывают

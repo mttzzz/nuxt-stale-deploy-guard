@@ -3,11 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { $fetch, fetch, setup } from '@nuxt/test-utils/e2e'
 import { describe, expect, it } from 'vitest'
 
-describe('cache headers — fixture: default', async () => {
-  await setup({
-    rootDir: fileURLToPath(new URL('../fixtures/default', import.meta.url)),
-  })
+await setup({
+  rootDir: fileURLToPath(new URL('../fixtures/default', import.meta.url)),
+})
 
+describe('cache headers — fixture: default', () => {
   it('GET / → no-cache, must-revalidate (HTML защищён от Safari heuristic)', async () => {
     const res = await fetch('/', { redirect: 'manual' })
     const cc = res.headers.get('cache-control') ?? ''
