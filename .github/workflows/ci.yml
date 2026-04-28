@@ -17,15 +17,18 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
-      - run: npm i -g --force corepack@latest && corepack enable
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npx nypm@latest i
+        run: bun install --frozen-lockfile
+
+      - name: Prepare
+        run: bun run dev:prepare
 
       - name: Lint
-        run: npm run lint
+        run: bun run lint
 
   test:
     runs-on: ubuntu-latest
@@ -35,15 +38,15 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
-      - run: npm i -g --force corepack@latest && corepack enable
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npx nypm@latest i
+        run: bun install --frozen-lockfile
 
-      - name: Playground prepare
-        run: npm run dev:prepare
+      - name: Prepare
+        run: bun run dev:prepare
 
       - name: Test
-        run: npm run test
+        run: bun run test
