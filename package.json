@@ -45,7 +45,8 @@
   },
   "dependencies": {
     "@nuxt/kit": "^4.4.2",
-    "defu": "^6.1.4"
+    "defu": "^6.1.4",
+    "h3": "^1.15.0"
   },
   "devDependencies": {
     "@nuxt/devtools": "^3.2.4",

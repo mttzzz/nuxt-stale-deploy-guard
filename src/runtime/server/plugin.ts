@@ -1,4 +1,5 @@
-import { defineNitroPlugin, getHeader, getRequestURL, setHeader, useRuntimeConfig } from 'nitropack/runtime'
+import { getHeader, getRequestURL, setHeader } from 'h3'
+import { defineNitroPlugin, useRuntimeConfig } from 'nitropack/runtime'
 
 import type { ResolvedModuleOptions } from '../types'
 

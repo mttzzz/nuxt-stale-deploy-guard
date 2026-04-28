@@ -8,7 +8,6 @@
     "generate": "nuxt generate"
   },
   "dependencies": {
-    "@mttzzz/nuxt-stale-deploy-guard": "*",
     "nuxt": "^4.4.2"
   }
 }
