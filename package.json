@@ -1,14 +1,18 @@
 {
-  "name": "nuxt-stale-deploy-guard",
-  "version": "1.0.0",
-  "description": "My new Nuxt module",
-  "repository": "your-org/my-module",
+  "name": "@mttzzz/nuxt-stale-deploy-guard",
+  "version": "0.1.0",
+  "description": "Nuxt 4 module: Cache-Control headers + verify-before-reload chunk guard for SPA deploys",
+  "repository": "github:mttzzz/nuxt-stale-deploy-guard",
   "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/types.d.mts",
       "import": "./dist/module.mjs"
+    },
+    "./sentry": {
+      "types": "./dist/runtime/sentry.d.mts",
+      "import": "./dist/runtime/sentry.mjs"
     }
   },
   "main": "./dist/module.mjs",
@@ -16,6 +20,9 @@
     "*": {
       ".": [
         "./dist/types.d.mts"
+      ],
+      "sentry": [
+        "./dist/runtime/sentry.d.mts"
       ]
     }
   },
@@ -30,14 +37,15 @@
     "dev": "npm run dev:prepare && nuxt dev playground",
     "dev:build": "nuxt build playground",
     "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxt prepare playground",
-    "release": "npm run lint && npm run test && npm run prepack && changelogen --release && npm publish && git push --follow-tags",
+    "release": "npm run lint && npm run test && npm run prepack && changelogen --release && git push --follow-tags",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:types": "vue-tsc --noEmit && cd playground && vue-tsc --noEmit"
   },
   "dependencies": {
-    "@nuxt/kit": "^4.4.2"
+    "@nuxt/kit": "^4.4.2",
+    "defu": "^6.1.4"
   },
   "devDependencies": {
     "@nuxt/devtools": "^3.2.4",
@@ -52,5 +60,8 @@
     "typescript": "~6.0.3",
     "vitest": "^4.1.5",
     "vue-tsc": "^3.2.7"
+  },
+  "peerDependencies": {
+    "nuxt": "^4.0.0"
   }
 }

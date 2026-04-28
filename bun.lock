@@ -6,6 +6,7 @@
       "name": "nuxt-stale-deploy-guard",
       "dependencies": {
         "@nuxt/kit": "^4.4.2",
+        "defu": "^6.1.4",
       },
       "devDependencies": {
         "@nuxt/devtools": "^3.2.4",
@@ -20,6 +21,9 @@
         "typescript": "~6.0.3",
         "vitest": "^4.1.5",
         "vue-tsc": "^3.2.7",
+      },
+      "peerDependencies": {
+        "nuxt": "^4.0.0",
       },
     },
     "playground": {
