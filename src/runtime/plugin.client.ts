@@ -25,13 +25,14 @@ function makeFetchServerBuildId(headerName: string) {
     const common = {
       cache: 'no-store' as const,
       credentials: 'same-origin' as const,
-      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
+      headers: { 'cache-control': 'no-cache', 'pragma': 'no-cache' },
     }
     try {
       const response = await globalThis.fetch(url, { method: 'HEAD', ...common })
       const id = response.headers.get(headerName)?.trim() ?? ''
       if (id) return id
-    } catch {
+    }
+    catch {
       /* fallthrough → GET */
     }
     try {
@@ -40,7 +41,8 @@ function makeFetchServerBuildId(headerName: string) {
         headers: { ...common.headers, accept: 'text/html' },
       })
       return response.headers.get(headerName)?.trim() ?? ''
-    } catch {
+    }
+    catch {
       return ''
     }
   }
@@ -83,7 +85,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     void guard.verifyAndReload()
   })
   globalThis.addEventListener('error', (event) => {
-    const errorLike = event as { error?: unknown; message?: unknown }
+    const errorLike = event as { error?: unknown, message?: unknown }
     const candidate: unknown = errorLike.error ?? errorLike.message
     if (!isStaleChunkError(candidate)) return
     event.preventDefault()

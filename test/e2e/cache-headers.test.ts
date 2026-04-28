@@ -16,7 +16,7 @@ describe('cache headers — fixture: default', () => {
 
   it('GET /_nuxt/<chunk>.js → immutable', async () => {
     const html = await $fetch<string>('/')
-    const m = html.match(/\/_nuxt\/[A-Za-z0-9_-]+\.js/)
+    const m = html.match(/\/_nuxt\/[\w-]+\.js/)
     expect(m, 'chunk url не найден в HTML').toBeTruthy()
     const res = await fetch(m![0])
     const cc = res.headers.get('cache-control') ?? ''

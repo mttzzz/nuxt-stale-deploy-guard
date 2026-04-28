@@ -1,3 +1,5 @@
 <template>
-  <div data-testid="root">default fixture</div>
+  <div data-testid="root">
+    default fixture
+  </div>
 </template>

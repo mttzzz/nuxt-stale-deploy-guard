@@ -11,7 +11,7 @@ function makeFetchServerBuildId(headerName) {
     const common = {
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "cache-control": "no-cache", pragma: "no-cache" }
+      headers: { "cache-control": "no-cache", "pragma": "no-cache" }
     };
     try {
       const response = await globalThis.fetch(url, { method: "HEAD", ...common });

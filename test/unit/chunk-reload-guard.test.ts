@@ -130,9 +130,9 @@ describe('createChunkReloadGuard', () => {
       expect(reload).not.toHaveBeenCalled()
     })
 
-    it("Couldn't resolve component — verify + reload", async () => {
+    it('Couldn\'t resolve component — verify + reload', async () => {
       const { guard, reload } = setup({ buildId: 'v1', serverId: 'v2' })
-      guard.handleStaleChunkError(new Error("Couldn't resolve component Foo"))
+      guard.handleStaleChunkError(new Error('Couldn\'t resolve component Foo'))
       await flushMicrotasks()
       expect(reload).toHaveBeenCalledOnce()
     })

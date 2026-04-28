@@ -20,7 +20,7 @@ export interface SentryBreadcrumbLike {
   category?: string
   level?: string
   message?: string
-  data?: { arguments?: unknown[]; [key: string]: unknown }
+  data?: { arguments?: unknown[], [key: string]: unknown }
 }
 
 export interface SentryEventLike {
@@ -32,7 +32,7 @@ const DEFAULT_BREADCRUMB_WINDOW_MS = 5_000
 
 export function hasRecentStaleChunkBreadcrumb(
   event: SentryEventLike,
-  opts: { now?: number; windowMs?: number } = {},
+  opts: { now?: number, windowMs?: number } = {},
 ): boolean {
   const breadcrumbs = event.breadcrumbs
   if (!breadcrumbs || breadcrumbs.length === 0) {
@@ -40,7 +40,7 @@ export function hasRecentStaleChunkBreadcrumb(
   }
   const windowMs = opts.windowMs ?? DEFAULT_BREADCRUMB_WINDOW_MS
   const eventTimeMs = typeof event.timestamp === 'number' ? event.timestamp * 1000 : (opts.now ?? Date.now())
-  return breadcrumbs.some((crumb) => crumbMatches(crumb, eventTimeMs, windowMs))
+  return breadcrumbs.some(crumb => crumbMatches(crumb, eventTimeMs, windowMs))
 }
 
 function crumbMatches(crumb: SentryBreadcrumbLike, eventTimeMs: number, windowMs: number): boolean {

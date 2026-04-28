@@ -14,7 +14,7 @@ export interface ModuleOptions {
   /** Cooldown между verify (мс). Default: 10_000. */
   cooldownMs?: number
   /** Circuit breaker. Default: { maxAttempts: 3, windowMs: 300_000 }. */
-  circuitBreaker?: { maxAttempts: number; windowMs: number }
+  circuitBreaker?: { maxAttempts: number, windowMs: number }
 }
 
 export interface ResolvedModuleOptions {
@@ -25,5 +25,5 @@ export interface ResolvedModuleOptions {
   serviceWorkerPath: string
   pollIntervalMs: number
   cooldownMs: number
-  circuitBreaker: { maxAttempts: number; windowMs: number }
+  circuitBreaker: { maxAttempts: number, windowMs: number }
 }

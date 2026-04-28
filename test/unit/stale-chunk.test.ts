@@ -7,13 +7,13 @@ describe('STALE_CHUNK_PATTERNS', () => {
     'Failed to fetch dynamically imported module: /_nuxt/abc.js',
     'error loading dynamically imported module',
     'Importing a module script failed.',
-    "Couldn't resolve component Foo",
+    'Couldn\'t resolve component Foo',
   ])('matches %j', (msg) => {
-    expect(STALE_CHUNK_PATTERNS.some((re) => re.test(msg))).toBe(true)
+    expect(STALE_CHUNK_PATTERNS.some(re => re.test(msg))).toBe(true)
   })
 
   it.each(['Cannot read properties of undefined', 'Network request failed', ''])('does not match %j', (msg) => {
-    expect(STALE_CHUNK_PATTERNS.some((re) => re.test(msg))).toBe(false)
+    expect(STALE_CHUNK_PATTERNS.some(re => re.test(msg))).toBe(false)
   })
 })
 
@@ -28,7 +28,7 @@ describe('isStaleChunkMessage', () => {
 
 describe('isStaleChunkError', () => {
   it('Error instance with stale message → true', () => {
-    expect(isStaleChunkError(new Error("Couldn't resolve component Foo"))).toBe(true)
+    expect(isStaleChunkError(new Error('Couldn\'t resolve component Foo'))).toBe(true)
   })
   it('Error instance with unrelated message → false', () => {
     expect(isStaleChunkError(new Error('boom'))).toBe(false)

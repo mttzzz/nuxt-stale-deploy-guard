@@ -12,7 +12,7 @@ export const STALE_CHUNK_PATTERNS: readonly RegExp[] = [
 ] as const
 
 export function isStaleChunkMessage(message: string): boolean {
-  return STALE_CHUNK_PATTERNS.some((pattern) => pattern.test(message))
+  return STALE_CHUNK_PATTERNS.some(pattern => pattern.test(message))
 }
 
 function extractErrorMessage(err: unknown): string {
