@@ -11,8 +11,8 @@
       "import": "./dist/module.mjs"
     },
     "./sentry": {
-      "types": "./dist/runtime/sentry.d.mts",
-      "import": "./dist/runtime/sentry.mjs"
+      "types": "./dist/runtime/sentry.d.ts",
+      "import": "./dist/runtime/sentry.js"
     }
   },
   "main": "./dist/module.mjs",
@@ -22,7 +22,7 @@
         "./dist/types.d.mts"
       ],
       "sentry": [
-        "./dist/runtime/sentry.d.mts"
+        "./dist/runtime/sentry.d.ts"
       ]
     }
   },

@@ -1,6 +1,6 @@
 import { defineNitroPlugin, getHeader, getRequestURL, setHeader, useRuntimeConfig } from 'nitropack/runtime'
 
-import type { ResolvedModuleOptions } from './types'
+import type { ResolvedModuleOptions } from '../types'
 
 const NO_STORE_HTML = 'no-cache, no-store, must-revalidate'
 

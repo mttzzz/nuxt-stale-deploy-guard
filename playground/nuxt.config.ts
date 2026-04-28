@@ -1,6 +1,6 @@
 export default defineNuxtConfig({
-  modules: ['my-module'],
+  ssr: false,
+  modules: ['@mttzzz/nuxt-stale-deploy-guard'],
   devtools: { enabled: true },
   compatibilityDate: 'latest',
-  myModule: {},
 })
