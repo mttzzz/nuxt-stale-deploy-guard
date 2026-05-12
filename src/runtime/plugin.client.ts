@@ -1,6 +1,7 @@
 import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from '#app'
 
 import { createChunkReloadGuard } from './chunk-reload-guard'
+import { createSafeSessionStorage } from './safe-storage'
 import { isStaleChunkError } from './stale-chunk'
 import type { ResolvedModuleOptions } from './types'
 
@@ -58,7 +59,11 @@ export default defineNuxtPlugin((nuxtApp) => {
     reload: () => reloadNuxtApp({ force: true, persistState: true }),
     fetchServerBuildId: makeFetchServerBuildId(opts.buildIdHeader),
     now: () => Date.now(),
-    storage: sessionStorage,
+    /* `createSafeSessionStorage()` — wrapper, защищающий от SecurityError при
+     * доступе к sessionStorage в restricted-браузерах (Telegram WebView и т.п.).
+     * Раньше тут был прямой `sessionStorage`, который throw'ил синхронно при
+     * инициализации плагина и валил публичные страницы консьюмеров (KP-MODMB-COM-K). */
+    storage: createSafeSessionStorage(),
     dispatchBlocked: (detail) => {
       globalThis.dispatchEvent(new CustomEvent('app:chunk-reload-blocked', { detail }))
     },
