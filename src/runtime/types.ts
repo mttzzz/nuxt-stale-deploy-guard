@@ -15,6 +15,14 @@ export interface ModuleOptions {
   cooldownMs?: number
   /** Circuit breaker. Default: { maxAttempts: 3, windowMs: 300_000 }. */
   circuitBreaker?: { maxAttempts: number, windowMs: number }
+  /**
+   * Если true (default) — client guard НЕ подключается в Nuxt dev-режиме.
+   * Причина: в dev Vite на каждый HMR-rebuild временно отвечает 503 на старые chunks;
+   * guard ловит это через `vite:preloadError` и инициирует `reloadNuxtApp({ force: true })`,
+   * что создаёт false-positive «приложение лежит» при каждой правке. В проде поведение нужное —
+   * не трогаем. Поставьте `false` если намеренно тестируете guard локально. Default: true.
+   */
+  skipInDev?: boolean
 }
 
 export interface ResolvedModuleOptions {
@@ -26,4 +34,5 @@ export interface ResolvedModuleOptions {
   pollIntervalMs: number
   cooldownMs: number
   circuitBreaker: { maxAttempts: number, windowMs: number }
+  skipInDev: boolean
 }

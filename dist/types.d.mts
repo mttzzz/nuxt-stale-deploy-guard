@@ -1,3 +1,3 @@
 export { type ModuleOptions } from '../dist/runtime/types.js'
 
-export { default } from './module.mjs'
+export { default, type shouldEnableClientGuard } from './module.mjs'

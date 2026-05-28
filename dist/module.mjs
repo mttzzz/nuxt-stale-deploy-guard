@@ -9,8 +9,15 @@ const DEFAULTS = {
   serviceWorkerPath: "/service-worker.js",
   pollIntervalMs: 6e4,
   cooldownMs: 1e4,
-  circuitBreaker: { maxAttempts: 3, windowMs: 5 * 6e4 }
+  circuitBreaker: { maxAttempts: 3, windowMs: 5 * 6e4 },
+  skipInDev: true
 };
+function shouldEnableClientGuard(opts, isDev) {
+  if (opts.skipInDev && isDev) {
+    return false;
+  }
+  return true;
+}
 const module$1 = defineNuxtModule({
   meta: {
     name: "@mttzzz/nuxt-stale-deploy-guard",
@@ -33,7 +40,8 @@ const module$1 = defineNuxtModule({
       serviceWorkerPath: opts.serviceWorkerPath ?? DEFAULTS.serviceWorkerPath,
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       cooldownMs: opts.cooldownMs ?? DEFAULTS.cooldownMs,
-      circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker)
+      circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker),
+      skipInDev: opts.skipInDev ?? DEFAULTS.skipInDev
     };
     const ourRules = {};
     for (const p of resolved.htmlPaths) {
@@ -57,8 +65,10 @@ const module$1 = defineNuxtModule({
       resolved
     );
     addServerPlugin(resolver.resolve("./runtime/server/plugin"));
-    addPlugin({ src: resolver.resolve("./runtime/plugin.client"), mode: "client" });
+    if (shouldEnableClientGuard(resolved, nuxt.options.dev)) {
+      addPlugin({ src: resolver.resolve("./runtime/plugin.client"), mode: "client" });
+    }
   }
 });
 
-export { module$1 as default };
+export { module$1 as default, shouldEnableClientGuard };

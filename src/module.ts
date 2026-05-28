@@ -14,6 +14,17 @@ const DEFAULTS: ResolvedModuleOptions = {
   pollIntervalMs: 60_000,
   cooldownMs: 10_000,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 60_000 },
+  skipInDev: true,
+}
+
+/* Чистая функция для решения «подключать ли client guard» — extract для unit-теста.
+   В dev guard ловит Vite HMR preloadError-ы (503 на стержневые chunks во время rebuild) и
+   force-reload'ит страницу, создавая false-positive «приложение лежит». Disable by default. */
+export function shouldEnableClientGuard(opts: ResolvedModuleOptions, isDev: boolean): boolean {
+  if (opts.skipInDev && isDev) {
+    return false
+  }
+  return true
 }
 
 export default defineNuxtModule<ModuleOptions>({
@@ -39,6 +50,7 @@ export default defineNuxtModule<ModuleOptions>({
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       cooldownMs: opts.cooldownMs ?? DEFAULTS.cooldownMs,
       circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker),
+      skipInDev: opts.skipInDev ?? DEFAULTS.skipInDev,
     }
 
     /*
@@ -72,11 +84,13 @@ export default defineNuxtModule<ModuleOptions>({
       resolved,
     ) as ResolvedModuleOptions
 
-    /* 3) Server plugin (Nitro) */
+    /* 3) Server plugin (Nitro) — оставляем всегда: cache-headers нужны и в dev для корректности. */
     addServerPlugin(resolver.resolve('./runtime/server/plugin'))
 
-    /* 4) Client plugin */
-    addPlugin({ src: resolver.resolve('./runtime/plugin.client'), mode: 'client' })
+    /* 4) Client plugin — в dev пропускаем (см. shouldEnableClientGuard + skipInDev option). */
+    if (shouldEnableClientGuard(resolved, nuxt.options.dev)) {
+      addPlugin({ src: resolver.resolve('./runtime/plugin.client'), mode: 'client' })
+    }
   },
 })
 

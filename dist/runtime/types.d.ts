@@ -18,6 +18,14 @@ export interface ModuleOptions {
         maxAttempts: number;
         windowMs: number;
     };
+    /**
+     * Если true (default) — client guard НЕ подключается в Nuxt dev-режиме.
+     * Причина: в dev Vite на каждый HMR-rebuild временно отвечает 503 на старые chunks;
+     * guard ловит это через `vite:preloadError` и инициирует `reloadNuxtApp({ force: true })`,
+     * что создаёт false-positive «приложение лежит» при каждой правке. В проде поведение нужное —
+     * не трогаем. Поставьте `false` если намеренно тестируете guard локально. Default: true.
+     */
+    skipInDev?: boolean;
 }
 export interface ResolvedModuleOptions {
     buildIdHeader: string;
@@ -31,4 +39,5 @@ export interface ResolvedModuleOptions {
         maxAttempts: number;
         windowMs: number;
     };
+    skipInDev: boolean;
 }
