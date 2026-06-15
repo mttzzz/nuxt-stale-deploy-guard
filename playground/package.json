@@ -1,6 +1,6 @@
 {
-  "private": true,
   "name": "stale-deploy-guard-playground",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "nuxt dev",

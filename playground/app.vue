@@ -14,8 +14,11 @@ function triggerVitePreloadError() {
 <template>
   <div style="font-family: system-ui; padding: 2rem; max-width: 720px; margin: 0 auto">
     <h1>stale-deploy-guard playground</h1>
-    <p>buildId: <code>{{ config.app.buildId }}</code></p>
-    <p>API response: <pre>{{ data }}</pre></p>
+    <p>
+      buildId: <code>{{ config.app.buildId }}</code>
+    </p>
+    <p>API response:</p>
+    <pre>{{ data }}</pre>
     <button
       type="button"
       @click="triggerVitePreloadError"

@@ -4,6 +4,7 @@ import {
   CHUNK_RELOAD_ATTEMPTS_KEY,
   CHUNK_RELOAD_CIRCUIT_WINDOW_MS,
   CHUNK_RELOAD_COOLDOWN_MS,
+  type ChunkReloadBlockedDetail,
   createChunkReloadGuard,
 } from '../../src/runtime/chunk-reload-guard'
 
@@ -17,7 +18,9 @@ function createFakeStorage() {
     setItem: (k: string, v: string): void => {
       store.set(k, v)
     },
-    clear: (): void => store.clear(),
+    clear: (): void => {
+      store.clear()
+    },
   }
 }
 
@@ -27,7 +30,7 @@ async function flushMicrotasks() {
   await Promise.resolve()
 }
 
-type GuardSetupOpts = {
+interface GuardSetupOpts {
   buildId?: string
   serverId?: string | null
   fetchFails?: boolean
@@ -37,15 +40,19 @@ type GuardSetupOpts = {
 function setup(opts: GuardSetupOpts = {}) {
   const { buildId = 'v1', serverId = 'v2', fetchFails = false, emptyServerId = false } = opts
 
-  const reload = vi.fn()
-  const dispatchBlocked = vi.fn()
+  const reload = vi.fn<() => void>()
+  const dispatchBlocked = vi.fn<(detail: ChunkReloadBlockedDetail) => void>()
   const storage = createFakeStorage()
   const nowSpy = vi.fn(() => Date.now())
 
-  const fetchServerBuildId = vi.fn(async (): Promise<string> => {
-    if (fetchFails) throw new Error('network')
-    if (emptyServerId) return ''
-    return serverId ?? ''
+  const fetchServerBuildId = vi.fn((): Promise<string> => {
+    if (fetchFails) {
+      return Promise.reject(new Error('network'))
+    }
+    if (emptyServerId) {
+      return Promise.resolve('')
+    }
+    return Promise.resolve(serverId ?? '')
   })
 
   const guard = createChunkReloadGuard({
@@ -130,9 +137,9 @@ describe('createChunkReloadGuard', () => {
       expect(reload).not.toHaveBeenCalled()
     })
 
-    it('Couldn\'t resolve component — verify + reload', async () => {
+    it("Couldn't resolve component — verify + reload", async () => {
       const { guard, reload } = setup({ buildId: 'v1', serverId: 'v2' })
-      guard.handleStaleChunkError(new Error('Couldn\'t resolve component Foo'))
+      guard.handleStaleChunkError(new Error("Couldn't resolve component Foo"))
       await flushMicrotasks()
       expect(reload).toHaveBeenCalledOnce()
     })
@@ -140,6 +147,7 @@ describe('createChunkReloadGuard', () => {
     it('null / undefined / пустая строка → ignore', async () => {
       const { guard, reload, fetchServerBuildId } = setup({ buildId: 'v1', serverId: 'v2' })
       guard.handleStaleChunkError(null)
+      // oxlint-disable-next-line unicorn/no-useless-undefined -- undefined здесь обязательный аргумент-кейс
       guard.handleStaleChunkError(undefined)
       guard.handleStaleChunkError('')
       await flushMicrotasks()
@@ -197,6 +205,7 @@ describe('createChunkReloadGuard', () => {
         expect.objectContaining({
           reason: 'circuit-breaker',
           windowMs: CIRCUIT_WINDOW_MS,
+          // oxlint-disable-next-line typescript/no-unsafe-assignment -- vitest expect.any() typed as any by design
           attempts: expect.any(Number),
         }),
       )

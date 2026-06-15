@@ -1,13 +1,13 @@
 export const STALE_CHUNK_PATTERNS = [
-  /Couldn't resolve component/i,
-  /Failed to fetch dynamically imported module/i,
-  /error loading dynamically imported module/i,
-  /Importing a module script failed/i
+  /Couldn't resolve component/iu,
+  /Failed to fetch dynamically imported module/iu,
+  /error loading dynamically imported module/iu,
+  /Importing a module script failed/iu
 ];
 export function isStaleChunkMessage(message) {
   return STALE_CHUNK_PATTERNS.some((pattern) => pattern.test(message));
 }
-export const DEPLOY_NOISE_PATTERNS = [/Error fetching app manifest/i];
+export const DEPLOY_NOISE_PATTERNS = [/Error fetching app manifest/iu];
 export function isDeployNoiseMessage(message) {
   return DEPLOY_NOISE_PATTERNS.some((pattern) => pattern.test(message));
 }

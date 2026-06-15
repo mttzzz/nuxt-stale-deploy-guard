@@ -11,11 +11,11 @@ const NOW_S = 1_700_000_000
 
 function ev(opts: {
   ts?: number
-  crumbs?: { ts?: number, category?: string, level?: string, message?: string, args?: unknown[] }[]
+  crumbs?: { ts?: number; category?: string; level?: string; message?: string; args?: unknown[] }[]
 }): SentryEventLike {
   return {
     timestamp: opts.ts ?? NOW_S,
-    breadcrumbs: opts.crumbs?.map(c => ({
+    breadcrumbs: opts.crumbs?.map((c) => ({
       timestamp: c.ts,
       category: c.category,
       level: c.level,
@@ -104,7 +104,7 @@ describe('hasRecentStaleChunkBreadcrumb', () => {
               ts: NOW_S - 1,
               category: 'console',
               level: 'error',
-              args: [new Error('Couldn\'t resolve component Foo')],
+              args: [new Error("Couldn't resolve component Foo")],
             },
           ],
         }),
@@ -150,7 +150,12 @@ describe('deploy-noise: Nuxt app-manifest fetch error', () => {
       hasRecentStaleChunkBreadcrumb(
         ev({
           crumbs: [
-            { ts: NOW_S - 1, category: 'console', level: 'error', message: `${MANIFEST_MSG} TypeError: Failed to fetch` },
+            {
+              ts: NOW_S - 1,
+              category: 'console',
+              level: 'error',
+              message: `${MANIFEST_MSG} TypeError: Failed to fetch`,
+            },
           ],
         }),
       ),
@@ -177,7 +182,9 @@ describe('deploy-noise: Nuxt app-manifest fetch error', () => {
   it('createSentryStaleChunkFilter drops the event', () => {
     const filter = createSentryStaleChunkFilter()
     const e = ev({
-      crumbs: [{ ts: NOW_S - 1, category: 'console', level: 'error', message: `${MANIFEST_MSG} TypeError: Failed to fetch` }],
+      crumbs: [
+        { ts: NOW_S - 1, category: 'console', level: 'error', message: `${MANIFEST_MSG} TypeError: Failed to fetch` },
+      ],
     })
     expect(filter(e)).toBeNull()
   })

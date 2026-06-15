@@ -37,10 +37,7 @@ export default defineNuxtConfig({
 
 ```ts
 // app/plugins/sentry.client.ts
-import {
-  createSentryStaleChunkFilter,
-  STALE_CHUNK_PATTERNS,
-} from '@mttzzz/nuxt-stale-deploy-guard/sentry'
+import { createSentryStaleChunkFilter, STALE_CHUNK_PATTERNS } from '@mttzzz/nuxt-stale-deploy-guard/sentry'
 
 Sentry.init({
   ignoreErrors: [...STALE_CHUNK_PATTERNS],
@@ -66,16 +63,16 @@ event-shape, имеющим `breadcrumbs`.
 
 ## Опции
 
-| Опция | Default | Описание |
-|-------|---------|----------|
-| `buildIdHeader` | `'x-app-build-id'` | имя header'а с build-id |
-| `htmlPaths` | `['/**']` | пути с no-cache,must-revalidate |
-| `immutablePaths` | `['/_nuxt/**']` | immutable пути |
-| `apiPaths` | `['/api/**']` | no-store пути |
-| `serviceWorkerPath` | `'/service-worker.js'` | SW путь |
-| `pollIntervalMs` | `60_000` | passive poll, 0 = выкл |
-| `cooldownMs` | `10_000` | cooldown между verify |
-| `circuitBreaker` | `{maxAttempts:3, windowMs:300_000}` | защита от infinite reload |
+| Опция               | Default                             | Описание                        |
+| ------------------- | ----------------------------------- | ------------------------------- |
+| `buildIdHeader`     | `'x-app-build-id'`                  | имя header'а с build-id         |
+| `htmlPaths`         | `['/**']`                           | пути с no-cache,must-revalidate |
+| `immutablePaths`    | `['/_nuxt/**']`                     | immutable пути                  |
+| `apiPaths`          | `['/api/**']`                       | no-store пути                   |
+| `serviceWorkerPath` | `'/service-worker.js'`              | SW путь                         |
+| `pollIntervalMs`    | `60_000`                            | passive poll, 0 = выкл          |
+| `cooldownMs`        | `10_000`                            | cooldown между verify           |
+| `circuitBreaker`    | `{maxAttempts:3, windowMs:300_000}` | защита от infinite reload       |
 
 User-defined `routeRules` имеют приоритет над дефолтами модуля (через `defu(user, ours)`).
 

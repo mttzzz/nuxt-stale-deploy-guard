@@ -12,12 +12,14 @@ function makeFetchServerBuildId(headerName) {
     const common = {
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "cache-control": "no-cache", "pragma": "no-cache" }
+      headers: { "cache-control": "no-cache", pragma: "no-cache" }
     };
     try {
       const response = await globalThis.fetch(url, { method: "HEAD", ...common });
       const id = response.headers.get(headerName)?.trim() ?? "";
-      if (id) return id;
+      if (id) {
+        return id;
+      }
     } catch {
     }
     try {
@@ -37,7 +39,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   const router = useRouter();
   const guard = createChunkReloadGuard({
     getBuildId: () => typeof config.app.buildId === "string" ? config.app.buildId : "",
-    reload: () => reloadNuxtApp({ force: true, persistState: true }),
+    reload: () => {
+      reloadNuxtApp({ force: true, persistState: true });
+    },
     fetchServerBuildId: makeFetchServerBuildId(opts.buildIdHeader),
     now: () => Date.now(),
     /* `createSafeSessionStorage()` — wrapper, защищающий от SecurityError при
@@ -64,14 +68,18 @@ export default defineNuxtPlugin((nuxtApp) => {
   });
   globalThis.addEventListener("unhandledrejection", (event) => {
     const { reason } = event;
-    if (!isStaleChunkError(reason)) return;
+    if (!isStaleChunkError(reason)) {
+      return;
+    }
     event.preventDefault();
     void guard.verifyAndReload();
   });
   globalThis.addEventListener("error", (event) => {
     const errorLike = event;
     const candidate = errorLike.error ?? errorLike.message;
-    if (!isStaleChunkError(candidate)) return;
+    if (!isStaleChunkError(candidate)) {
+      return;
+    }
     event.preventDefault();
     void guard.verifyAndReload();
   });

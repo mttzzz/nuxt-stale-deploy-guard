@@ -42,8 +42,7 @@ export function createSafeSessionStorage(): SafeStorage {
       probe.removeItem(PROBE_KEY)
       backend = probe
     }
-  }
-  catch {
+  } catch {
     backend = null
   }
 
@@ -52,8 +51,7 @@ export function createSafeSessionStorage(): SafeStorage {
       if (backend) {
         try {
           return backend.getItem(key)
-        }
-        catch {
+        } catch {
           backend = null
         }
       }
@@ -66,8 +64,7 @@ export function createSafeSessionStorage(): SafeStorage {
       if (backend) {
         try {
           backend.setItem(key, value)
-        }
-        catch {
+        } catch {
           backend = null
         }
       }

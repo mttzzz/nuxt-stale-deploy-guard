@@ -14,7 +14,7 @@ export interface ModuleOptions {
   /** Cooldown между verify (мс). Default: 10_000. */
   cooldownMs?: number
   /** Circuit breaker. Default: { maxAttempts: 3, windowMs: 300_000 }. */
-  circuitBreaker?: { maxAttempts: number, windowMs: number }
+  circuitBreaker?: { maxAttempts: number; windowMs: number }
   /**
    * Если true (default) — client guard НЕ подключается в Nuxt dev-режиме.
    * Причина: в dev Vite на каждый HMR-rebuild временно отвечает 503 на старые chunks;
@@ -33,6 +33,6 @@ export interface ResolvedModuleOptions {
   serviceWorkerPath: string
   pollIntervalMs: number
   cooldownMs: number
-  circuitBreaker: { maxAttempts: number, windowMs: number }
+  circuitBreaker: { maxAttempts: number; windowMs: number }
   skipInDev: boolean
 }

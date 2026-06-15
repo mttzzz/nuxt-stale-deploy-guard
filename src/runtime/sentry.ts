@@ -11,15 +11,15 @@
  * со stale-chunk сообщением.
  */
 
-import {
+import { isDeployNoiseMessage, isStaleChunkMessage } from './stale-chunk'
+
+export {
   DEPLOY_NOISE_PATTERNS,
   isDeployNoiseMessage,
   isStaleChunkError,
   isStaleChunkMessage,
   STALE_CHUNK_PATTERNS,
 } from './stale-chunk'
-
-export { DEPLOY_NOISE_PATTERNS, isDeployNoiseMessage, isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS }
 
 /* Drop-кандидаты Sentry-фильтра: stale-chunk (dynamic-import) ИЛИ deploy-noise
    (manifest-poll). Объединение шире, чем reload-триггер `isStaleChunkError`,
@@ -33,7 +33,7 @@ export interface SentryBreadcrumbLike {
   category?: string
   level?: string
   message?: string
-  data?: { arguments?: unknown[], [key: string]: unknown }
+  data?: { arguments?: unknown[]; [key: string]: unknown }
 }
 
 export interface SentryEventLike {
@@ -45,31 +45,45 @@ const DEFAULT_BREADCRUMB_WINDOW_MS = 5_000
 
 export function hasRecentStaleChunkBreadcrumb(
   event: SentryEventLike,
-  opts: { now?: number, windowMs?: number } = {},
+  opts: { now?: number; windowMs?: number } = {},
 ): boolean {
-  const breadcrumbs = event.breadcrumbs
+  const { breadcrumbs } = event
   if (!breadcrumbs || breadcrumbs.length === 0) {
     return false
   }
   const windowMs = opts.windowMs ?? DEFAULT_BREADCRUMB_WINDOW_MS
   const eventTimeMs = typeof event.timestamp === 'number' ? event.timestamp * 1000 : (opts.now ?? Date.now())
-  return breadcrumbs.some(crumb => crumbMatches(crumb, eventTimeMs, windowMs))
+  return breadcrumbs.some((crumb) => crumbMatches(crumb, eventTimeMs, windowMs))
 }
 
 function crumbMatches(crumb: SentryBreadcrumbLike, eventTimeMs: number, windowMs: number): boolean {
-  if (typeof crumb.timestamp !== 'number') return false
+  if (typeof crumb.timestamp !== 'number') {
+    return false
+  }
   const crumbTimeMs = crumb.timestamp * 1000
   const delta = eventTimeMs - crumbTimeMs
-  if (delta < 0 || delta > windowMs) return false
-  if (crumb.category !== 'console' || crumb.level !== 'error') return false
-  if (crumb.message && isDroppableBreadcrumbMessage(crumb.message)) return true
+  if (delta < 0 || delta > windowMs) {
+    return false
+  }
+  if (crumb.category !== 'console' || crumb.level !== 'error') {
+    return false
+  }
+  if (crumb.message && isDroppableBreadcrumbMessage(crumb.message)) {
+    return true
+  }
   const args = crumb.data?.arguments
-  if (!Array.isArray(args)) return false
+  if (!Array.isArray(args)) {
+    return false
+  }
   return args.some((arg) => {
-    if (typeof arg === 'string') return isDroppableBreadcrumbMessage(arg)
+    if (typeof arg === 'string') {
+      return isDroppableBreadcrumbMessage(arg)
+    }
     if (typeof arg === 'object' && arg !== null && 'message' in arg) {
       const { message } = arg as { message?: unknown }
-      if (typeof message === 'string') return isDroppableBreadcrumbMessage(message)
+      if (typeof message === 'string') {
+        return isDroppableBreadcrumbMessage(message)
+      }
     }
     return false
   })
@@ -83,6 +97,5 @@ function crumbMatches(crumb: SentryBreadcrumbLike, eventTimeMs: number, windowMs
 export function createSentryStaleChunkFilter(
   opts: { windowMs?: number } = {},
 ): <T extends SentryEventLike>(event: T) => T | null {
-  return <T extends SentryEventLike>(event: T): T | null =>
-    hasRecentStaleChunkBreadcrumb(event, opts) ? null : event
+  return <T extends SentryEventLike>(event: T): T | null => (hasRecentStaleChunkBreadcrumb(event, opts) ? null : event)
 }

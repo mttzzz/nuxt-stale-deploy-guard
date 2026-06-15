@@ -13,13 +13,13 @@ describe('STALE_CHUNK_PATTERNS', () => {
     'Failed to fetch dynamically imported module: /_nuxt/abc.js',
     'error loading dynamically imported module',
     'Importing a module script failed.',
-    'Couldn\'t resolve component Foo',
+    "Couldn't resolve component Foo",
   ])('matches %j', (msg) => {
-    expect(STALE_CHUNK_PATTERNS.some(re => re.test(msg))).toBe(true)
+    expect(STALE_CHUNK_PATTERNS.some((re) => re.test(msg))).toBe(true)
   })
 
   it.each(['Cannot read properties of undefined', 'Network request failed', ''])('does not match %j', (msg) => {
-    expect(STALE_CHUNK_PATTERNS.some(re => re.test(msg))).toBe(false)
+    expect(STALE_CHUNK_PATTERNS.some((re) => re.test(msg))).toBe(false)
   })
 })
 
@@ -33,13 +33,13 @@ describe('isStaleChunkMessage', () => {
 })
 
 describe('DEPLOY_NOISE_PATTERNS / isDeployNoiseMessage', () => {
-  it.each([
-    '[nuxt] Error fetching app manifest. TypeError: Failed to fetch',
-    'Error fetching app manifest',
-  ])('matches deploy-noise %j', (msg) => {
-    expect(isDeployNoiseMessage(msg)).toBe(true)
-    expect(DEPLOY_NOISE_PATTERNS.some(re => re.test(msg))).toBe(true)
-  })
+  it.each(['[nuxt] Error fetching app manifest. TypeError: Failed to fetch', 'Error fetching app manifest'])(
+    'matches deploy-noise %j',
+    (msg) => {
+      expect(isDeployNoiseMessage(msg)).toBe(true)
+      expect(DEPLOY_NOISE_PATTERNS.some((re) => re.test(msg))).toBe(true)
+    },
+  )
 
   it.each(['Failed to fetch', 'Network request failed', 'boom', ''])('does not match %j', (msg) => {
     expect(isDeployNoiseMessage(msg)).toBe(false)
@@ -55,13 +55,13 @@ describe('DEPLOY_NOISE_PATTERNS / isDeployNoiseMessage', () => {
     const manifestMsg = '[nuxt] Error fetching app manifest. TypeError: Failed to fetch'
     expect(isStaleChunkMessage(manifestMsg)).toBe(false)
     expect(isStaleChunkError(new Error(manifestMsg))).toBe(false)
-    expect(STALE_CHUNK_PATTERNS.some(re => re.test(manifestMsg))).toBe(false)
+    expect(STALE_CHUNK_PATTERNS.some((re) => re.test(manifestMsg))).toBe(false)
   })
 })
 
 describe('isStaleChunkError', () => {
   it('Error instance with stale message → true', () => {
-    expect(isStaleChunkError(new Error('Couldn\'t resolve component Foo'))).toBe(true)
+    expect(isStaleChunkError(new Error("Couldn't resolve component Foo"))).toBe(true)
   })
   it('Error instance with unrelated message → false', () => {
     expect(isStaleChunkError(new Error('boom'))).toBe(false)
@@ -74,6 +74,7 @@ describe('isStaleChunkError', () => {
   })
   it('null / undefined / number → false', () => {
     expect(isStaleChunkError(null)).toBe(false)
+    // oxlint-disable-next-line unicorn/no-useless-undefined -- undefined здесь обязательный аргумент-кейс
     expect(isStaleChunkError(undefined)).toBe(false)
     expect(isStaleChunkError(42)).toBe(false)
   })

@@ -12,7 +12,7 @@ describe('smoke — fixture: no-poll', () => {
     const html = await $fetch<string>('/')
     /* SPA отдаёт пустую div'ку, но inlines runtime config — там и проверяем */
     /* Inline config — JS-объект, ключи без кавычек: `pollIntervalMs:0` */
-    expect(html).toMatch(/pollIntervalMs:0[,}]/)
+    expect(html).toMatch(/pollIntervalMs:0[,}]/u)
   })
 
   it('Nuxt SPA-индекс рендерится без 5xx', async () => {

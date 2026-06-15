@@ -16,13 +16,13 @@ describe('cache headers — fixture: custom-paths', () => {
 
   it('GET /api/v2/foo → no-store (внутри apiPaths)', async () => {
     const res = await fetch('/api/v2/foo')
-    expect(res.headers.get('cache-control') ?? '').toMatch(/no-store/)
+    expect(res.headers.get('cache-control') ?? '').toMatch(/no-store/u)
   })
 
   it('GET /api/v1/foo → НЕ no-store (вне apiPaths)', async () => {
     const res = await fetch('/api/v1/foo')
     const cc = res.headers.get('cache-control') ?? ''
-    expect(cc).not.toMatch(/no-store/)
-    expect(cc).toMatch(/no-cache|must-revalidate/)
+    expect(cc).not.toMatch(/no-store/u)
+    expect(cc).toMatch(/no-cache|must-revalidate/u)
   })
 })

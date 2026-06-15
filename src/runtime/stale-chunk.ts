@@ -5,14 +5,14 @@
  */
 
 export const STALE_CHUNK_PATTERNS: readonly RegExp[] = [
-  /Couldn't resolve component/i,
-  /Failed to fetch dynamically imported module/i,
-  /error loading dynamically imported module/i,
-  /Importing a module script failed/i,
+  /Couldn't resolve component/iu,
+  /Failed to fetch dynamically imported module/iu,
+  /error loading dynamically imported module/iu,
+  /Importing a module script failed/iu,
 ] as const
 
 export function isStaleChunkMessage(message: string): boolean {
-  return STALE_CHUNK_PATTERNS.some(pattern => pattern.test(message))
+  return STALE_CHUNK_PATTERNS.some((pattern) => pattern.test(message))
 }
 
 /*
@@ -27,10 +27,10 @@ export function isStaleChunkMessage(message: string): boolean {
  * onunhandledrejection → Sentry (handled:no). Поллер сам ретраит — это не баг кода,
  * перезагружать страницу на него не нужно.
  */
-export const DEPLOY_NOISE_PATTERNS: readonly RegExp[] = [/Error fetching app manifest/i] as const
+export const DEPLOY_NOISE_PATTERNS: readonly RegExp[] = [/Error fetching app manifest/iu] as const
 
 export function isDeployNoiseMessage(message: string): boolean {
-  return DEPLOY_NOISE_PATTERNS.some(pattern => pattern.test(message))
+  return DEPLOY_NOISE_PATTERNS.some((pattern) => pattern.test(message))
 }
 
 function extractErrorMessage(err: unknown): string {

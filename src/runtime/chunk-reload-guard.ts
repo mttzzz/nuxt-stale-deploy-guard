@@ -66,12 +66,11 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
         if (Array.isArray(parsed)) {
           existing = parsed.filter((t): t is number => typeof t === 'number' && Number.isFinite(t))
         }
-      }
-      catch {
+      } catch {
         existing = []
       }
     }
-    const fresh = existing.filter(t => now - t < CHUNK_RELOAD_CIRCUIT_WINDOW_MS)
+    const fresh = existing.filter((t) => now - t < CHUNK_RELOAD_CIRCUIT_WINDOW_MS)
     fresh.push(now)
     deps.storage.setItem(CHUNK_RELOAD_ATTEMPTS_KEY, JSON.stringify(fresh))
     return fresh.length
@@ -94,8 +93,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
       let serverBuildId = ''
       try {
         serverBuildId = await deps.fetchServerBuildId(path)
-      }
-      catch {
+      } catch {
         serverBuildId = ''
       }
       if (!serverBuildId || serverBuildId === currentBuildId) {
@@ -114,8 +112,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
 
       markReloadNow()
       deps.reload()
-    }
-    finally {
+    } finally {
       verifyInFlight = false
     }
   }

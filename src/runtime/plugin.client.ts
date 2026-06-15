@@ -3,7 +3,6 @@ import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from '#a
 import { createChunkReloadGuard } from './chunk-reload-guard'
 import { createSafeSessionStorage } from './safe-storage'
 import { isStaleChunkError } from './stale-chunk'
-import type { ResolvedModuleOptions } from './types'
 
 /*
  * Клиентский Nuxt-плагин, оборачивающий чистый `createChunkReloadGuard` в реальные
@@ -26,15 +25,16 @@ function makeFetchServerBuildId(headerName: string) {
     const common = {
       cache: 'no-store' as const,
       credentials: 'same-origin' as const,
-      headers: { 'cache-control': 'no-cache', 'pragma': 'no-cache' },
+      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
     }
     try {
       const response = await globalThis.fetch(url, { method: 'HEAD', ...common })
       const id = response.headers.get(headerName)?.trim() ?? ''
-      if (id) return id
-    }
-    catch {
-      /* fallthrough → GET */
+      if (id) {
+        return id
+      }
+    } catch {
+      /* Fallthrough → GET */
     }
     try {
       const response = await globalThis.fetch(url, {
@@ -42,8 +42,7 @@ function makeFetchServerBuildId(headerName: string) {
         headers: { ...common.headers, accept: 'text/html' },
       })
       return response.headers.get(headerName)?.trim() ?? ''
-    }
-    catch {
+    } catch {
       return ''
     }
   }
@@ -51,12 +50,14 @@ function makeFetchServerBuildId(headerName: string) {
 
 export default defineNuxtPlugin((nuxtApp) => {
   const config = useRuntimeConfig()
-  const opts = config.public.staleDeployGuard as ResolvedModuleOptions
+  const opts = config.public.staleDeployGuard!
   const router = useRouter()
 
   const guard = createChunkReloadGuard({
     getBuildId: () => (typeof config.app.buildId === 'string' ? config.app.buildId : ''),
-    reload: () => reloadNuxtApp({ force: true, persistState: true }),
+    reload: () => {
+      reloadNuxtApp({ force: true, persistState: true })
+    },
     fetchServerBuildId: makeFetchServerBuildId(opts.buildIdHeader),
     now: () => Date.now(),
     /* `createSafeSessionStorage()` — wrapper, защищающий от SecurityError при
@@ -72,9 +73,11 @@ export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.hook('app:chunkError', () => {
     void guard.verifyAndReload()
   })
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('vue:error', (error) => {
     guard.handleStaleChunkError(error)
   })
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('app:error', (error) => {
     guard.handleStaleChunkError(error)
   })
@@ -85,14 +88,18 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
   globalThis.addEventListener('unhandledrejection', (event) => {
     const { reason } = event as { reason?: unknown }
-    if (!isStaleChunkError(reason)) return
+    if (!isStaleChunkError(reason)) {
+      return
+    }
     event.preventDefault()
     void guard.verifyAndReload()
   })
   globalThis.addEventListener('error', (event) => {
-    const errorLike = event as { error?: unknown, message?: unknown }
+    const errorLike = event as { error?: unknown; message?: unknown }
     const candidate: unknown = errorLike.error ?? errorLike.message
-    if (!isStaleChunkError(candidate)) return
+    if (!isStaleChunkError(candidate)) {
+      return
+    }
     event.preventDefault()
     void guard.verifyAndReload()
   })

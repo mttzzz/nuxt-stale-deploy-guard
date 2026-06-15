@@ -10,8 +10,7 @@ const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionS
 afterEach(() => {
   if (originalDescriptor) {
     Object.defineProperty(globalThis, 'sessionStorage', originalDescriptor)
-  }
-  else {
+  } else {
     Reflect.deleteProperty(globalThis, 'sessionStorage')
   }
 })
@@ -22,8 +21,7 @@ function installStorageMock(value: Storage | (() => Storage)): void {
       configurable: true,
       get: value,
     })
-  }
-  else {
+  } else {
     Object.defineProperty(globalThis, 'sessionStorage', {
       configurable: true,
       writable: true,
@@ -42,7 +40,9 @@ function createInMemoryStorage(): Storage {
     removeItem: (key): void => {
       store.delete(key)
     },
-    clear: (): void => store.clear(),
+    clear: (): void => {
+      store.clear()
+    },
     key: (): string | null => null,
     get length(): number {
       return store.size
@@ -84,7 +84,7 @@ describe('createSafeSessionStorage — fallback при SecurityError на proper
     })
   })
 
-  it('не throw\'ит при создании', () => {
+  it("не throw'ит при создании", () => {
     expect(() => createSafeSessionStorage()).not.toThrow()
   })
 
@@ -112,7 +112,7 @@ describe('createSafeSessionStorage — fallback при throw на setItem', () =
     } as Storage)
   })
 
-  it('создание не throw\'ит', () => {
+  it("создание не throw'ит", () => {
     expect(() => createSafeSessionStorage()).not.toThrow()
   })
 
@@ -131,11 +131,15 @@ describe('createSafeSessionStorage — runtime degradation', () => {
     const store = new Map<string, string>()
     installStorageMock({
       getItem: (key: string): string | null => {
-        if (throwOnNext) throw new Error('SecurityError: Access is denied')
+        if (throwOnNext) {
+          throw new Error('SecurityError: Access is denied')
+        }
         return store.get(key) ?? null
       },
       setItem: (key: string, value: string): void => {
-        if (throwOnNext) throw new Error('SecurityError: Access is denied')
+        if (throwOnNext) {
+          throw new Error('SecurityError: Access is denied')
+        }
         store.set(key, value)
       },
       removeItem: (key: string): void => {
@@ -147,7 +151,7 @@ describe('createSafeSessionStorage — runtime degradation', () => {
     } as Storage)
   })
 
-  it('переключается на memory если backend начал throw\'ить', () => {
+  it("переключается на memory если backend начал throw'ить", () => {
     const storage = createSafeSessionStorage()
     storage.setItem('a', '1')
     expect(storage.getItem('a')).toBe('1')
@@ -166,7 +170,7 @@ describe('createSafeSessionStorage — globalThis.sessionStorage = undefined (SS
     Reflect.deleteProperty(globalThis, 'sessionStorage')
   })
 
-  it('не throw\'ит и работает через memory', () => {
+  it("не throw'ит и работает через memory", () => {
     const storage = createSafeSessionStorage()
     storage.setItem('key', 'value')
     expect(storage.getItem('key')).toBe('value')

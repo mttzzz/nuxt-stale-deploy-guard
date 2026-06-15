@@ -11,21 +11,21 @@ describe('cache headers — fixture: default', () => {
   it('GET / → no-cache, must-revalidate (HTML защищён от Safari heuristic)', async () => {
     const res = await fetch('/', { redirect: 'manual' })
     const cc = res.headers.get('cache-control') ?? ''
-    expect(cc).toMatch(/no-cache|no-store|must-revalidate/)
+    expect(cc).toMatch(/no-cache|no-store|must-revalidate/u)
   })
 
   it('GET /_nuxt/<chunk>.js → immutable', async () => {
     const html = await $fetch<string>('/')
-    const m = html.match(/\/_nuxt\/[\w-]+\.js/)
+    const m = /\/_nuxt\/[\w-]+\.js/u.exec(html)
     expect(m, 'chunk url не найден в HTML').toBeTruthy()
     const res = await fetch(m![0])
     const cc = res.headers.get('cache-control') ?? ''
-    expect(cc).toMatch(/immutable|max-age=\d{7,}/)
+    expect(cc).toMatch(/immutable|max-age=\d{7,}/u)
   })
 
   it('GET /api/foo → no-store', async () => {
     const res = await fetch('/api/foo')
-    expect(res.headers.get('cache-control') ?? '').toMatch(/no-store/)
+    expect(res.headers.get('cache-control') ?? '').toMatch(/no-store/u)
   })
 
   it('Любой response несёт x-app-build-id', async () => {

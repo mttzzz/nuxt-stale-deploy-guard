@@ -34,7 +34,7 @@ export default defineNuxtModule<ModuleOptions>({
     compatibility: { nuxt: '^4.0.0' },
   },
   /*
-   * defaults пустой намеренно: defineNuxtModule(...defaults) применяет defu(user, defaults),
+   * Defaults пустой намеренно: defineNuxtModule(...defaults) применяет defu(user, defaults),
    * а defu конкатенирует массивы (['/api/v2/**'] + ['/api/**']). Нам нужен replace на массивах,
    * поэтому раскрываем дефолты вручную ниже через `??`.
    */

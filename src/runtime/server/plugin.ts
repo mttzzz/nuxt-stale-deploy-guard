@@ -1,13 +1,11 @@
 import { getHeader, getRequestURL, setHeader } from 'h3'
 import { defineNitroPlugin, useRuntimeConfig } from 'nitropack/runtime'
 
-import type { ResolvedModuleOptions } from '../types'
-
 const NO_STORE_HTML = 'no-cache, no-store, must-revalidate'
 
 function applyHeaders(event: Parameters<typeof getRequestURL>[0]) {
   const config = useRuntimeConfig(event)
-  const opts = config.public.staleDeployGuard as ResolvedModuleOptions
+  const opts = config.public.staleDeployGuard!
   const buildId = typeof config.app.buildId === 'string' ? config.app.buildId : ''
 
   if (buildId) {
