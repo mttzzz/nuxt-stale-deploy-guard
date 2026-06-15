@@ -15,6 +15,24 @@ export function isStaleChunkMessage(message: string): boolean {
   return STALE_CHUNK_PATTERNS.some(pattern => pattern.test(message))
 }
 
+/*
+ * Deploy-transient ошибки, которые НЕ являются stale-chunk'ом (не триггерят reload),
+ * но шумят в Sentry в окне деплоя. Дропаются только Sentry-фильтром (sub-export `/sentry`),
+ * НЕ участвуют в `isStaleChunkError` → `verifyAndReload`.
+ *
+ * `Error fetching app manifest`: при `experimental.checkOutdatedBuildInterval` Nuxt
+ * периодически пингует build-манифест (`/_nuxt/builds/...json`). Во время деплоя
+ * (рестарт сервера) или при сетевом блипе `$fetch` падает «TypeError: Failed to fetch»,
+ * Nuxt логирует «[nuxt] Error fetching app manifest.» и reject всплывает как
+ * onunhandledrejection → Sentry (handled:no). Поллер сам ретраит — это не баг кода,
+ * перезагружать страницу на него не нужно.
+ */
+export const DEPLOY_NOISE_PATTERNS: readonly RegExp[] = [/Error fetching app manifest/i] as const
+
+export function isDeployNoiseMessage(message: string): boolean {
+  return DEPLOY_NOISE_PATTERNS.some(pattern => pattern.test(message))
+}
+
 function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message

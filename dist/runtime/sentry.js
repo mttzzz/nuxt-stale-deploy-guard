@@ -1,5 +1,14 @@
-import { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS } from "./stale-chunk.js";
-export { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS };
+import {
+  DEPLOY_NOISE_PATTERNS,
+  isDeployNoiseMessage,
+  isStaleChunkError,
+  isStaleChunkMessage,
+  STALE_CHUNK_PATTERNS
+} from "./stale-chunk.js";
+export { DEPLOY_NOISE_PATTERNS, isDeployNoiseMessage, isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS };
+function isDroppableBreadcrumbMessage(message) {
+  return isStaleChunkMessage(message) || isDeployNoiseMessage(message);
+}
 const DEFAULT_BREADCRUMB_WINDOW_MS = 5e3;
 export function hasRecentStaleChunkBreadcrumb(event, opts = {}) {
   const breadcrumbs = event.breadcrumbs;
@@ -16,14 +25,14 @@ function crumbMatches(crumb, eventTimeMs, windowMs) {
   const delta = eventTimeMs - crumbTimeMs;
   if (delta < 0 || delta > windowMs) return false;
   if (crumb.category !== "console" || crumb.level !== "error") return false;
-  if (crumb.message && isStaleChunkMessage(crumb.message)) return true;
+  if (crumb.message && isDroppableBreadcrumbMessage(crumb.message)) return true;
   const args = crumb.data?.arguments;
   if (!Array.isArray(args)) return false;
   return args.some((arg) => {
-    if (typeof arg === "string") return isStaleChunkMessage(arg);
+    if (typeof arg === "string") return isDroppableBreadcrumbMessage(arg);
     if (typeof arg === "object" && arg !== null && "message" in arg) {
       const { message } = arg;
-      if (typeof message === "string") return isStaleChunkMessage(message);
+      if (typeof message === "string") return isDroppableBreadcrumbMessage(message);
     }
     return false;
   });

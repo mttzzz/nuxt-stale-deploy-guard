@@ -11,9 +11,22 @@
  * со stale-chunk сообщением.
  */
 
-import { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS } from './stale-chunk'
+import {
+  DEPLOY_NOISE_PATTERNS,
+  isDeployNoiseMessage,
+  isStaleChunkError,
+  isStaleChunkMessage,
+  STALE_CHUNK_PATTERNS,
+} from './stale-chunk'
 
-export { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS }
+export { DEPLOY_NOISE_PATTERNS, isDeployNoiseMessage, isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS }
+
+/* Drop-кандидаты Sentry-фильтра: stale-chunk (dynamic-import) ИЛИ deploy-noise
+   (manifest-poll). Объединение шире, чем reload-триггер `isStaleChunkError`,
+   который намеренно остаётся только на STALE_CHUNK_PATTERNS. */
+function isDroppableBreadcrumbMessage(message: string): boolean {
+  return isStaleChunkMessage(message) || isDeployNoiseMessage(message)
+}
 
 export interface SentryBreadcrumbLike {
   timestamp?: number
@@ -49,14 +62,14 @@ function crumbMatches(crumb: SentryBreadcrumbLike, eventTimeMs: number, windowMs
   const delta = eventTimeMs - crumbTimeMs
   if (delta < 0 || delta > windowMs) return false
   if (crumb.category !== 'console' || crumb.level !== 'error') return false
-  if (crumb.message && isStaleChunkMessage(crumb.message)) return true
+  if (crumb.message && isDroppableBreadcrumbMessage(crumb.message)) return true
   const args = crumb.data?.arguments
   if (!Array.isArray(args)) return false
   return args.some((arg) => {
-    if (typeof arg === 'string') return isStaleChunkMessage(arg)
+    if (typeof arg === 'string') return isDroppableBreadcrumbMessage(arg)
     if (typeof arg === 'object' && arg !== null && 'message' in arg) {
       const { message } = arg as { message?: unknown }
-      if (typeof message === 'string') return isStaleChunkMessage(message)
+      if (typeof message === 'string') return isDroppableBreadcrumbMessage(message)
     }
     return false
   })
@@ -64,7 +77,8 @@ function crumbMatches(crumb: SentryBreadcrumbLike, eventTimeMs: number, windowMs
 
 /**
  * Возвращает функцию для `Sentry.init({ beforeSend })`. Дропает event'ы, где
- * за последние `windowMs` мс был breadcrumb со stale-chunk console.error.
+ * за последние `windowMs` мс был console.error-breadcrumb со stale-chunk или
+ * deploy-noise (manifest-poll) сообщением.
  */
 export function createSentryStaleChunkFilter(
   opts: { windowMs?: number } = {},

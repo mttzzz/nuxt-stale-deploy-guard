@@ -7,6 +7,10 @@ export const STALE_CHUNK_PATTERNS = [
 export function isStaleChunkMessage(message) {
   return STALE_CHUNK_PATTERNS.some((pattern) => pattern.test(message));
 }
+export const DEPLOY_NOISE_PATTERNS = [/Error fetching app manifest/i];
+export function isDeployNoiseMessage(message) {
+  return DEPLOY_NOISE_PATTERNS.some((pattern) => pattern.test(message));
+}
 function extractErrorMessage(err) {
   if (err instanceof Error) {
     return err.message;

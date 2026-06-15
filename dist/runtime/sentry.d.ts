@@ -1,5 +1,5 @@
-import { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS } from './stale-chunk.js';
-export { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS };
+import { DEPLOY_NOISE_PATTERNS, isDeployNoiseMessage, isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS } from './stale-chunk.js';
+export { DEPLOY_NOISE_PATTERNS, isDeployNoiseMessage, isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS };
 export interface SentryBreadcrumbLike {
     timestamp?: number;
     category?: string;
@@ -20,7 +20,8 @@ export declare function hasRecentStaleChunkBreadcrumb(event: SentryEventLike, op
 }): boolean;
 /**
  * Возвращает функцию для `Sentry.init({ beforeSend })`. Дропает event'ы, где
- * за последние `windowMs` мс был breadcrumb со stale-chunk console.error.
+ * за последние `windowMs` мс был console.error-breadcrumb со stale-chunk или
+ * deploy-noise (manifest-poll) сообщением.
  */
 export declare function createSentryStaleChunkFilter(opts?: {
     windowMs?: number;
