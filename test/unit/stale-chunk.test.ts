@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 
-import { isStaleChunkError, isStaleChunkMessage, STALE_CHUNK_PATTERNS } from '../../src/runtime/stale-chunk'
+import {
+  DEPLOY_NOISE_PATTERNS,
+  isDeployNoiseMessage,
+  isStaleChunkError,
+  isStaleChunkMessage,
+  STALE_CHUNK_PATTERNS,
+} from '../../src/runtime/stale-chunk'
 
 describe('STALE_CHUNK_PATTERNS', () => {
   it.each([
@@ -23,6 +29,33 @@ describe('isStaleChunkMessage', () => {
   })
   it('returns false for unrelated string', () => {
     expect(isStaleChunkMessage('Some other thing')).toBe(false)
+  })
+})
+
+describe('DEPLOY_NOISE_PATTERNS / isDeployNoiseMessage', () => {
+  it.each([
+    '[nuxt] Error fetching app manifest. TypeError: Failed to fetch',
+    'Error fetching app manifest',
+  ])('matches deploy-noise %j', (msg) => {
+    expect(isDeployNoiseMessage(msg)).toBe(true)
+    expect(DEPLOY_NOISE_PATTERNS.some(re => re.test(msg))).toBe(true)
+  })
+
+  it.each(['Failed to fetch', 'Network request failed', 'boom', ''])('does not match %j', (msg) => {
+    expect(isDeployNoiseMessage(msg)).toBe(false)
+  })
+
+  /*
+   * Инвариант: deploy-noise паттерны НЕ должны попадать в stale-chunk-распознавание,
+   * иначе chunk-reload-guard (isStaleChunkError → verifyAndReload) начнёт перезагружать
+   * страницу на каждый транзиентный manifest-сбой. Эти паттерны живут отдельно и
+   * используются только Sentry-фильтром.
+   */
+  it('manifest-ошибка НЕ распознаётся как stale-chunk (не триггерит reload)', () => {
+    const manifestMsg = '[nuxt] Error fetching app manifest. TypeError: Failed to fetch'
+    expect(isStaleChunkMessage(manifestMsg)).toBe(false)
+    expect(isStaleChunkError(new Error(manifestMsg))).toBe(false)
+    expect(STALE_CHUNK_PATTERNS.some(re => re.test(manifestMsg))).toBe(false)
   })
 })
 

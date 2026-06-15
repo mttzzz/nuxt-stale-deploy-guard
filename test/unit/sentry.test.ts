@@ -134,6 +134,55 @@ describe('hasRecentStaleChunkBreadcrumb', () => {
   })
 })
 
+describe('deploy-noise: Nuxt app-manifest fetch error', () => {
+  /*
+   * Прод-инцидент AI-PUSHKA-BIZ-1M: при `experimental.checkOutdatedBuildInterval`
+   * Nuxt каждые N секунд пингует build-манифест (`/_nuxt/builds/...`). В окне деплоя
+   * (рестарт сервера) или при сетевом блипе `$fetch` падает с "TypeError: Failed to fetch",
+   * Nuxt логирует "[nuxt] Error fetching app manifest." и reject всплывает как
+   * onunhandledrejection → Sentry (handled:no). Это транзиентный deploy-шум, не баг кода —
+   * фильтр должен его дропать, как и stale-chunk ошибки.
+   */
+  const MANIFEST_MSG = '[nuxt] Error fetching app manifest.'
+
+  it('match via message → true', () => {
+    expect(
+      hasRecentStaleChunkBreadcrumb(
+        ev({
+          crumbs: [
+            { ts: NOW_S - 1, category: 'console', level: 'error', message: `${MANIFEST_MSG} TypeError: Failed to fetch` },
+          ],
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it('match via data.arguments (real Sentry console-breadcrumb shape) → true', () => {
+    expect(
+      hasRecentStaleChunkBreadcrumb(
+        ev({
+          crumbs: [
+            {
+              ts: NOW_S - 1,
+              category: 'console',
+              level: 'error',
+              args: [MANIFEST_MSG, { message: 'Failed to fetch', name: 'TypeError' }],
+            },
+          ],
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it('createSentryStaleChunkFilter drops the event', () => {
+    const filter = createSentryStaleChunkFilter()
+    const e = ev({
+      crumbs: [{ ts: NOW_S - 1, category: 'console', level: 'error', message: `${MANIFEST_MSG} TypeError: Failed to fetch` }],
+    })
+    expect(filter(e)).toBeNull()
+  })
+})
+
 describe('createSentryStaleChunkFilter', () => {
   it('returns null for event with recent stale-chunk crumb', () => {
     const filter = createSentryStaleChunkFilter()
