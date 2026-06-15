@@ -95,9 +95,7 @@ export default defineNuxtModule<ModuleOptions>({
 })
 
 declare module 'nuxt/schema' {
-  interface RuntimeConfig {
-    public: RuntimeConfig['public'] & {
-      staleDeployGuard?: ResolvedModuleOptions
-    }
+  interface PublicRuntimeConfig {
+    staleDeployGuard?: ResolvedModuleOptions
   }
 }

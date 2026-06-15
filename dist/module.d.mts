@@ -6,10 +6,8 @@ declare function shouldEnableClientGuard(opts: ResolvedModuleOptions, isDev: boo
 declare const _default: _nuxt_schema.NuxtModule<ModuleOptions, ModuleOptions, false>;
 
 declare module 'nuxt/schema' {
-    interface RuntimeConfig {
-        public: RuntimeConfig['public'] & {
-            staleDeployGuard?: ResolvedModuleOptions;
-        };
+    interface PublicRuntimeConfig {
+        staleDeployGuard?: ResolvedModuleOptions;
     }
 }
 
