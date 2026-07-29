@@ -4,6 +4,8 @@ export const CHUNK_RELOAD_ATTEMPTS_KEY = "chunk-reload:attempts";
 export const CHUNK_RELOAD_COOLDOWN_MS = 1e4;
 export const CHUNK_RELOAD_CIRCUIT_WINDOW_MS = 5 * 60 * 1e3;
 export const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
+export const CHUNK_RELOAD_PROBES = 4;
+export const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
 export function createChunkReloadGuard(deps) {
   let verifyInFlight = false;
   function inCooldown() {
@@ -46,13 +48,25 @@ export function createChunkReloadGuard(deps) {
     }
     verifyInFlight = true;
     try {
-      let serverBuildId = "";
-      try {
-        serverBuildId = await deps.fetchServerBuildId(path);
-      } catch {
-        serverBuildId = "";
-      }
-      if (!serverBuildId || serverBuildId === currentBuildId) {
+      const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+      const probe = async (attempt) => {
+        let serverBuildId = "";
+        try {
+          serverBuildId = await deps.fetchServerBuildId(path, attempt);
+        } catch {
+          serverBuildId = "";
+        }
+        if (serverBuildId && serverBuildId !== currentBuildId) {
+          return serverBuildId;
+        }
+        if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
+          return "";
+        }
+        await sleep(CHUNK_RELOAD_PROBE_DELAY_MS);
+        return probe(attempt + 1);
+      };
+      const mismatch = await probe(0);
+      if (!mismatch) {
         return;
       }
       const attempts = recordAttemptAndCount();

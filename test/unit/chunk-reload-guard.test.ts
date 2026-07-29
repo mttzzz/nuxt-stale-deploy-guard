@@ -4,6 +4,7 @@ import {
   CHUNK_RELOAD_ATTEMPTS_KEY,
   CHUNK_RELOAD_CIRCUIT_WINDOW_MS,
   CHUNK_RELOAD_COOLDOWN_MS,
+  CHUNK_RELOAD_PROBES,
   type ChunkReloadBlockedDetail,
   createChunkReloadGuard,
 } from '../../src/runtime/chunk-reload-guard'
@@ -62,6 +63,8 @@ function setup(opts: GuardSetupOpts = {}) {
     now: nowSpy,
     storage,
     dispatchBlocked,
+    /* Мгновенный sleep: мульти-проба под fake timers иначе зависла бы на реальном setTimeout. */
+    sleep: async () => {},
   })
 
   return { guard, reload, dispatchBlocked, storage, fetchServerBuildId, nowSpy }
@@ -83,11 +86,12 @@ describe('createChunkReloadGuard', () => {
       expect(reload).toHaveBeenCalledExactlyOnceWith()
     })
 
-    it('server buildId совпадает → reload() НЕ вызывается', async () => {
+    it('server buildId совпадает → все пробы исчерпаны, reload() НЕ вызывается', async () => {
       const { guard, reload, fetchServerBuildId } = setup({ buildId: 'v1', serverId: 'v1' })
       await guard.verifyAndReload()
       await flushMicrotasks()
-      expect(fetchServerBuildId).toHaveBeenCalledOnce()
+      /* Мульти-проба: совпадение одной пробы больше не вердикт (mixed-поды при rolling). */
+      expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
       expect(reload).not.toHaveBeenCalled()
     })
 
@@ -117,7 +121,7 @@ describe('createChunkReloadGuard', () => {
       const { guard, fetchServerBuildId } = setup({ buildId: 'v1', serverId: 'v1' })
       await guard.verifyAndReload('/dashboard/page?foo=bar')
       await flushMicrotasks()
-      expect(fetchServerBuildId).toHaveBeenCalledWith('/dashboard/page?foo=bar')
+      expect(fetchServerBuildId).toHaveBeenCalledWith('/dashboard/page?foo=bar', 0)
     })
   })
 
@@ -178,11 +182,11 @@ describe('createChunkReloadGuard', () => {
   })
 
   describe('verifyInFlight', () => {
-    it('3 параллельных verify → 1 fetch', async () => {
+    it('3 параллельных verify → пробы только от ОДНОГО (verifyInFlight)', async () => {
       const { guard, fetchServerBuildId } = setup({ buildId: 'v1', serverId: 'v1' })
       await Promise.all([guard.verifyAndReload(), guard.verifyAndReload(), guard.verifyAndReload()])
       await flushMicrotasks()
-      expect(fetchServerBuildId).toHaveBeenCalledOnce()
+      expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
     })
   })
 
@@ -232,5 +236,77 @@ describe('createChunkReloadGuard', () => {
       await flushMicrotasks()
       expect(reload).toHaveBeenCalledOnce()
     })
+  })
+})
+
+describe('мульти-проба (mixed-pods при replicas>=2, инцидент ai.pushka.biz 29.07)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date('2026-04-23T00:00:00Z') })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /* Одна проба гонится с окном роллинга: HEAD может попасть в СТАРЫЙ под → build-id совпал →
+     «деплоя нет» → приложение остаётся мёртвым (белая страница, hard refresh руками).
+     Мульти-проба: reload, если ХОТЬ ОДНА из проб увидела чужой build-id. */
+  it('первая проба видит свой buildId (старый под), вторая — новый → reload', async () => {
+    const reload = vi.fn<() => void>()
+    const answers = ['v1', 'v2']
+    const fetchServerBuildId = vi.fn(async () => answers.shift() ?? 'v2')
+    const guard = createChunkReloadGuard({
+      getBuildId: () => 'v1',
+      reload,
+      fetchServerBuildId,
+      now: () => Date.now(),
+      storage: createFakeStorage(),
+      dispatchBlocked: vi.fn(),
+      sleep: async () => {},
+    })
+
+    await guard.verifyAndReload()
+
+    expect(fetchServerBuildId).toHaveBeenCalledTimes(2)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('все пробы совпали со своим buildId → все PROBE_COUNT проб исчерпаны, reload нет', async () => {
+    const reload = vi.fn<() => void>()
+    const fetchServerBuildId = vi.fn(async () => 'v1')
+    const guard = createChunkReloadGuard({
+      getBuildId: () => 'v1',
+      reload,
+      fetchServerBuildId,
+      now: () => Date.now(),
+      storage: createFakeStorage(),
+      dispatchBlocked: vi.fn(),
+      sleep: async () => {},
+    })
+
+    await guard.verifyAndReload()
+
+    expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('пробы получают индекс попытки — плагин добавляет по нему cache-buster', async () => {
+    const seen: unknown[] = []
+    const fetchServerBuildId = vi.fn(async (_path: string, attempt?: number) => {
+      seen.push(attempt)
+      return 'v1'
+    })
+    const guard = createChunkReloadGuard({
+      getBuildId: () => 'v1',
+      reload: vi.fn(),
+      fetchServerBuildId,
+      now: () => Date.now(),
+      storage: createFakeStorage(),
+      dispatchBlocked: vi.fn(),
+      sleep: async () => {},
+    })
+
+    await guard.verifyAndReload()
+
+    expect(seen).toEqual([0, 1, 2, 3])
   })
 })

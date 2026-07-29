@@ -3,6 +3,8 @@ export declare const CHUNK_RELOAD_ATTEMPTS_KEY = "chunk-reload:attempts";
 export declare const CHUNK_RELOAD_COOLDOWN_MS = 10000;
 export declare const CHUNK_RELOAD_CIRCUIT_WINDOW_MS: number;
 export declare const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
+export declare const CHUNK_RELOAD_PROBES = 4;
+export declare const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
 export interface ChunkReloadBlockedDetail {
     reason: 'circuit-breaker';
     attempts: number;
@@ -11,8 +13,9 @@ export interface ChunkReloadBlockedDetail {
 export interface ChunkReloadDeps {
     getBuildId: () => string;
     reload: () => void;
-    fetchServerBuildId: (path: string) => Promise<string>;
+    fetchServerBuildId: (path: string, attempt?: number) => Promise<string>;
     now: () => number;
+    sleep?: (ms: number) => Promise<void>;
     storage: Pick<Storage, 'getItem' | 'setItem'>;
     dispatchBlocked: (detail: ChunkReloadBlockedDetail) => void;
 }

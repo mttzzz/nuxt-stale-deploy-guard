@@ -23,6 +23,14 @@ export const CHUNK_RELOAD_COOLDOWN_MS = 10_000
 export const CHUNK_RELOAD_CIRCUIT_WINDOW_MS = 5 * 60 * 1000
 export const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3
 
+/* Мульти-проба верификации (инцидент ai.pushka.biz 29.07, replicas>=2): в окне rolling-деплоя
+ * единственная HEAD-проба 50/50 попадает в СТАРЫЙ под → build-id совпал → «деплоя нет» →
+ * приложение остаётся мёртвым до ручного hard refresh. Пробуем несколько раз с паузой
+ * (балансировщик раскидывает запросы по подам) и релоадим, если ХОТЬ ОДНА проба увидела
+ * чужой build-id. Вероятность ложного «деплоя нет»: 50% → ~6% при 4 пробах. */
+export const CHUNK_RELOAD_PROBES = 4
+export const CHUNK_RELOAD_PROBE_DELAY_MS = 400
+
 export interface ChunkReloadBlockedDetail {
   reason: 'circuit-breaker'
   attempts: number
@@ -32,8 +40,10 @@ export interface ChunkReloadBlockedDetail {
 export interface ChunkReloadDeps {
   getBuildId: () => string
   reload: () => void
-  fetchServerBuildId: (path: string) => Promise<string>
+  fetchServerBuildId: (path: string, attempt?: number) => Promise<string>
   now: () => number
+  /* Пауза между пробами; инъектится в тестах. По умолчанию — реальный setTimeout. */
+  sleep?: (ms: number) => Promise<void>
   storage: Pick<Storage, 'getItem' | 'setItem'>
   dispatchBlocked: (detail: ChunkReloadBlockedDetail) => void
 }
@@ -90,13 +100,26 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
 
     verifyInFlight = true
     try {
-      let serverBuildId = ''
-      try {
-        serverBuildId = await deps.fetchServerBuildId(path)
-      } catch {
-        serverBuildId = ''
+      const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+      /* Рекурсивные пробы: чужой id → немедленный вердикт; иначе пауза и следующая проба. */
+      const probe = async (attempt: number): Promise<string> => {
+        let serverBuildId = ''
+        try {
+          serverBuildId = await deps.fetchServerBuildId(path, attempt)
+        } catch {
+          serverBuildId = ''
+        }
+        if (serverBuildId && serverBuildId !== currentBuildId) {
+          return serverBuildId
+        }
+        if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
+          return ''
+        }
+        await sleep(CHUNK_RELOAD_PROBE_DELAY_MS)
+        return probe(attempt + 1)
       }
-      if (!serverBuildId || serverBuildId === currentBuildId) {
+      const mismatch = await probe(0)
+      if (!mismatch) {
         return
       }
 

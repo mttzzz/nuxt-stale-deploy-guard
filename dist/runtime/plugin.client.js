@@ -6,9 +6,11 @@ function getCurrentLocationPath() {
   return `${globalThis.location.pathname}${globalThis.location.search}`;
 }
 function makeFetchServerBuildId(headerName) {
-  return async (path) => {
+  return async (path, attempt = 0) => {
     const target = path || getCurrentLocationPath();
-    const url = new URL(target, globalThis.location.origin).toString();
+    const probeUrl = new URL(target, globalThis.location.origin);
+    probeUrl.searchParams.set("sdg-probe", `${Date.now()}-${attempt}`);
+    const url = probeUrl.toString();
     const common = {
       cache: "no-store",
       credentials: "same-origin",

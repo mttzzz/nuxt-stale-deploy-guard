@@ -19,9 +19,13 @@ function getCurrentLocationPath(): string {
 }
 
 function makeFetchServerBuildId(headerName: string) {
-  return async (path: string): Promise<string> => {
+  return async (path: string, attempt = 0): Promise<string> => {
     const target = path || getCurrentLocationPath()
-    const url = new URL(target, globalThis.location.origin).toString()
+    const probeUrl = new URL(target, globalThis.location.origin)
+    /* Cache-buster per-проба: исключает переиспользование ответа любым промежуточным кэшем —
+       мульти-проба обязана реально дойти до сервера (и балансировщик раскидает по подам). */
+    probeUrl.searchParams.set('sdg-probe', `${Date.now()}-${attempt}`)
+    const url = probeUrl.toString()
     const common = {
       cache: 'no-store' as const,
       credentials: 'same-origin' as const,
