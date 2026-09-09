@@ -1,4 +1,4 @@
-import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from "#app";
+import { defineNuxtPlugin, reloadNuxtApp, useRuntimeConfig } from "#app";
 import { createChunkReloadGuard } from "./chunk-reload-guard.js";
 import { createSafeSessionStorage } from "./safe-storage.js";
 import { isStaleChunkError } from "./stale-chunk.js";
@@ -38,7 +38,6 @@ function makeFetchServerBuildId(headerName) {
 export default defineNuxtPlugin((nuxtApp) => {
   const config = useRuntimeConfig();
   const opts = config.public.staleDeployGuard;
-  const router = useRouter();
   const guard = createChunkReloadGuard({
     getBuildId: () => typeof config.app.buildId === "string" ? config.app.buildId : "",
     reload: () => {
@@ -85,25 +84,11 @@ export default defineNuxtPlugin((nuxtApp) => {
     event.preventDefault();
     void guard.verifyAndReload();
   });
-  router.beforeEach((to, from) => {
-    if (to.fullPath !== from.fullPath) {
-      void guard.verifyAndReload(to.fullPath);
-    }
-  });
-  nuxtApp.hook("app:mounted", () => {
-    void guard.verifyAndReload(getCurrentLocationPath());
-    globalThis.addEventListener("online", () => {
-      void guard.verifyAndReload(getCurrentLocationPath());
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        void guard.verifyAndReload(getCurrentLocationPath());
-      }
-    });
-    if (opts.pollIntervalMs > 0) {
+  if (opts.pollIntervalMs > 0) {
+    nuxtApp.hook("app:mounted", () => {
       globalThis.setInterval(() => {
-        void guard.verifyAndReload(getCurrentLocationPath());
+        void guard.verifyConvergedAndReload(getCurrentLocationPath());
       }, opts.pollIntervalMs);
-    }
-  });
+    });
+  }
 });

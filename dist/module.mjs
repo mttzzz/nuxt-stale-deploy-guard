@@ -7,7 +7,7 @@ const DEFAULTS = {
   immutablePaths: ["/_nuxt/**"],
   apiPaths: ["/api/**"],
   serviceWorkerPath: "/service-worker.js",
-  pollIntervalMs: 6e4,
+  pollIntervalMs: 0,
   cooldownMs: 1e4,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 6e4 },
   skipInDev: true

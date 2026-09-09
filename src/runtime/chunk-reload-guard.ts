@@ -6,9 +6,14 @@ import { isStaleChunkError } from './stale-chunk'
  * в отдельный модуль, чтобы тестировать без Nuxt runtime.
  *
  * Semantics:
- *   - `verifyAndReload(path)` — фетчит server buildId, сравнивает с текущим,
- *     релоадит только при расхождении. Защищает от бесконечного reload'а при НЕ-deploy
- *     поломках чанка (build-bug, CDN-промах, сетевой хиккап).
+ *   - `verifyAndReload(path)` — реактивный вердикт для СЛОМАННОЙ вкладки (stale-chunk ошибка):
+ *     фетчит server buildId пробами и релоадит, если ХОТЬ ОДНА проба увидела чужой id. Защищает
+ *     от бесконечного reload'а при НЕ-deploy поломках чанка (build-bug, CDN-промах, сетевой хиккап).
+ *   - `verifyConvergedAndReload(path)` — проактивный вердикт для РАБОТАЮЩЕЙ вкладки (опциональный
+ *     poll): релоадит только когда ВСЕ пробы единогласно увидели один и тот же чужой id — флот
+ *     сошёлся на новом билде. Вердикт «хоть одна проба» здесь ложный: в окне rolling-деплоя вкладка
+ *     на НОВОМ билде видит старый под, перезагружается и приезжает на старый билд — цикл до
+ *     circuit breaker'а (ai.pushka.biz 09.09.2026, replicas=2, maxSurge=1).
  *   - `handleStaleChunkError(err, path)` — фильтрует известные stale-chunk паттерны
  *     и триггерит verifyAndReload.
  *   - Cooldown (10s) + verifyInFlight защищают от параллельных вызовов/race'ов.
@@ -50,7 +55,14 @@ export interface ChunkReloadDeps {
 
 export interface ChunkReloadGuard {
   verifyAndReload: (path?: string) => Promise<void>
+  verifyConvergedAndReload: (path?: string) => Promise<void>
   handleStaleChunkError: (err: unknown, path?: string) => void
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  setTimeout(resolve, ms)
+  return promise
 }
 
 export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard {
@@ -86,7 +98,36 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
     return fresh.length
   }
 
-  async function verifyAndReload(path = ''): Promise<void> {
+  /* Серия проб с паузой. `stopOnMismatch` — реактивный режим: первый чужой id решает, дальше не
+     ходим. Иначе собираем все пробы для вердикта о схождении флота. Упавшая/пустая проба — ''. */
+  async function collectProbes(path: string, stopOnMismatch: boolean, currentBuildId: string): Promise<string[]> {
+    const sleep = deps.sleep ?? defaultSleep
+    async function probe(attempt: number, seen: string[]): Promise<string[]> {
+      let serverBuildId = ''
+      try {
+        serverBuildId = await deps.fetchServerBuildId(path, attempt)
+      } catch {
+        serverBuildId = ''
+      }
+      const collected = [...seen, serverBuildId]
+      if (stopOnMismatch && serverBuildId && serverBuildId !== currentBuildId) {
+        return collected
+      }
+      if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
+        return collected
+      }
+      await sleep(CHUNK_RELOAD_PROBE_DELAY_MS)
+      return probe(attempt + 1, collected)
+    }
+    return probe(0, [])
+  }
+
+  /* Общий каркас обоих вердиктов: пустой buildId, cooldown, single-flight, circuit breaker. */
+  async function verify(
+    path: string,
+    decide: (probes: string[], currentBuildId: string) => boolean,
+    stopOnMismatch: boolean,
+  ): Promise<void> {
     const currentBuildId = deps.getBuildId()
     if (!currentBuildId) {
       return
@@ -100,26 +141,8 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
 
     verifyInFlight = true
     try {
-      const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
-      /* Рекурсивные пробы: чужой id → немедленный вердикт; иначе пауза и следующая проба. */
-      const probe = async (attempt: number): Promise<string> => {
-        let serverBuildId = ''
-        try {
-          serverBuildId = await deps.fetchServerBuildId(path, attempt)
-        } catch {
-          serverBuildId = ''
-        }
-        if (serverBuildId && serverBuildId !== currentBuildId) {
-          return serverBuildId
-        }
-        if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
-          return ''
-        }
-        await sleep(CHUNK_RELOAD_PROBE_DELAY_MS)
-        return probe(attempt + 1)
-      }
-      const mismatch = await probe(0)
-      if (!mismatch) {
+      const probes = await collectProbes(path, stopOnMismatch, currentBuildId)
+      if (!decide(probes, currentBuildId)) {
         return
       }
 
@@ -140,6 +163,21 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
     }
   }
 
+  function verifyAndReload(path = ''): Promise<void> {
+    return verify(path, (probes, currentBuildId) => probes.some((id) => id !== '' && id !== currentBuildId), true)
+  }
+
+  function verifyConvergedAndReload(path = ''): Promise<void> {
+    return verify(
+      path,
+      (probes, currentBuildId) => {
+        const [first] = probes
+        return Boolean(first) && first !== currentBuildId && probes.every((id) => id === first)
+      },
+      false,
+    )
+  }
+
   function handleStaleChunkError(err: unknown, path = ''): void {
     if (isStaleChunkError(err)) {
       void verifyAndReload(path)
@@ -148,6 +186,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
 
   return {
     verifyAndReload: (path?: string) => verifyAndReload(path ?? ''),
+    verifyConvergedAndReload: (path?: string) => verifyConvergedAndReload(path ?? ''),
     handleStaleChunkError: (err: unknown, path?: string) => {
       handleStaleChunkError(err, path ?? '')
     },

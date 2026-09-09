@@ -57,9 +57,15 @@ event-shape, имеющим `breadcrumbs`.
   - `/service-worker.js` → `no-cache, no-store, must-revalidate`
 - Эмитит `x-app-build-id` header на каждый response (Nitro plugin).
 - Ловит `vite:preloadError`, `app:chunkError`, `vue:error`, `unhandledrejection`, `error` →
-  HEAD-запрос на текущий путь → если build-id отличается → reload через `reloadNuxtApp`.
+  серия HEAD-проб на текущий путь (4 через 400 мс, cache-buster `sdg-probe`) → если ХОТЬ ОДНА
+  увидела чужой build-id → reload через `reloadNuxtApp`. Reload только по доказательству, что
+  вкладка сломана: работающую вкладку модуль сам не перезагружает.
 - Cooldown 10s + circuit breaker (3 попытки в 5 мин). Превышение — `dispatchEvent('app:chunk-reload-blocked')`.
-- Passive poll: `setInterval(pollIntervalMs)`, `online`, `visibilitychange`, `router.beforeEach`.
+- Опциональный проактивный poll (`pollIntervalMs > 0`): та же серия проб, но reload только когда
+  ВСЕ пробы единогласно увидели один чужой build-id — флот сошёлся на новом билде. Вердикт «хоть
+  одна проба» здесь ложный: в окне rolling-деплоя вкладка на новом билде видела бы старый под и
+  уезжала на старый билд. О новой версии консьюмеру лучше сообщать самому
+  (Nuxt `app:manifest:update` → тост), а старую вкладку с immutable-ассетами на CDN не трогать.
 
 ## Опции
 
@@ -70,7 +76,7 @@ event-shape, имеющим `breadcrumbs`.
 | `immutablePaths`    | `['/_nuxt/**']`                     | immutable пути                  |
 | `apiPaths`          | `['/api/**']`                       | no-store пути                   |
 | `serviceWorkerPath` | `'/service-worker.js'`              | SW путь                         |
-| `pollIntervalMs`    | `60_000`                            | passive poll, 0 = выкл          |
+| `pollIntervalMs`    | `0`                                 | проактивный poll, 0 = выкл      |
 | `cooldownMs`        | `10_000`                            | cooldown между verify           |
 | `circuitBreaker`    | `{maxAttempts:3, windowMs:300_000}` | защита от infinite reload       |
 

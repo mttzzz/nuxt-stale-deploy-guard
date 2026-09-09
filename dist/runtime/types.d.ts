@@ -9,7 +9,12 @@ export interface ModuleOptions {
     apiPaths?: string[];
     /** Путь service worker. Default: '/service-worker.js'. */
     serviceWorkerPath?: string;
-    /** Passive poll интервал (мс), 0 = выключить. Default: 60_000. */
+    /**
+     * Проактивный poll (мс): раз в интервал HEAD-пробы по текущему пути, reload только когда ВСЕ пробы
+     * единогласно увидели один и тот же чужой build-id (флот сошёлся на новом билде). 0 = выключен.
+     * Единственный триггер, перезагружающий работающую вкладку; реактивный путь (stale-chunk ошибка →
+     * verify → reload) работает всегда и от этой опции не зависит. Default: 0.
+     */
     pollIntervalMs?: number;
     /** Cooldown между verify (мс). Default: 10_000. */
     cooldownMs?: number;

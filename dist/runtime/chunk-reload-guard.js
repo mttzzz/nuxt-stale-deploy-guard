@@ -6,6 +6,11 @@ export const CHUNK_RELOAD_CIRCUIT_WINDOW_MS = 5 * 60 * 1e3;
 export const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
 export const CHUNK_RELOAD_PROBES = 4;
 export const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
+function defaultSleep(ms) {
+  const { promise, resolve } = Promise.withResolvers();
+  setTimeout(resolve, ms);
+  return promise;
+}
 export function createChunkReloadGuard(deps) {
   let verifyInFlight = false;
   function inCooldown() {
@@ -35,7 +40,28 @@ export function createChunkReloadGuard(deps) {
     deps.storage.setItem(CHUNK_RELOAD_ATTEMPTS_KEY, JSON.stringify(fresh));
     return fresh.length;
   }
-  async function verifyAndReload(path = "") {
+  async function collectProbes(path, stopOnMismatch, currentBuildId) {
+    const sleep = deps.sleep ?? defaultSleep;
+    async function probe(attempt, seen) {
+      let serverBuildId = "";
+      try {
+        serverBuildId = await deps.fetchServerBuildId(path, attempt);
+      } catch {
+        serverBuildId = "";
+      }
+      const collected = [...seen, serverBuildId];
+      if (stopOnMismatch && serverBuildId && serverBuildId !== currentBuildId) {
+        return collected;
+      }
+      if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
+        return collected;
+      }
+      await sleep(CHUNK_RELOAD_PROBE_DELAY_MS);
+      return probe(attempt + 1, collected);
+    }
+    return probe(0, []);
+  }
+  async function verify(path, decide, stopOnMismatch) {
     const currentBuildId = deps.getBuildId();
     if (!currentBuildId) {
       return;
@@ -48,25 +74,8 @@ export function createChunkReloadGuard(deps) {
     }
     verifyInFlight = true;
     try {
-      const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-      const probe = async (attempt) => {
-        let serverBuildId = "";
-        try {
-          serverBuildId = await deps.fetchServerBuildId(path, attempt);
-        } catch {
-          serverBuildId = "";
-        }
-        if (serverBuildId && serverBuildId !== currentBuildId) {
-          return serverBuildId;
-        }
-        if (attempt + 1 >= CHUNK_RELOAD_PROBES) {
-          return "";
-        }
-        await sleep(CHUNK_RELOAD_PROBE_DELAY_MS);
-        return probe(attempt + 1);
-      };
-      const mismatch = await probe(0);
-      if (!mismatch) {
+      const probes = await collectProbes(path, stopOnMismatch, currentBuildId);
+      if (!decide(probes, currentBuildId)) {
         return;
       }
       const attempts = recordAttemptAndCount();
@@ -84,6 +93,19 @@ export function createChunkReloadGuard(deps) {
       verifyInFlight = false;
     }
   }
+  function verifyAndReload(path = "") {
+    return verify(path, (probes, currentBuildId) => probes.some((id) => id !== "" && id !== currentBuildId), true);
+  }
+  function verifyConvergedAndReload(path = "") {
+    return verify(
+      path,
+      (probes, currentBuildId) => {
+        const [first] = probes;
+        return Boolean(first) && first !== currentBuildId && probes.every((id) => id === first);
+      },
+      false
+    );
+  }
   function handleStaleChunkError(err, path = "") {
     if (isStaleChunkError(err)) {
       void verifyAndReload(path);
@@ -91,6 +113,7 @@ export function createChunkReloadGuard(deps) {
   }
   return {
     verifyAndReload: (path) => verifyAndReload(path ?? ""),
+    verifyConvergedAndReload: (path) => verifyConvergedAndReload(path ?? ""),
     handleStaleChunkError: (err, path) => {
       handleStaleChunkError(err, path ?? "");
     }

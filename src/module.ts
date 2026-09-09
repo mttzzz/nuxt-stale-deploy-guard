@@ -11,7 +11,7 @@ const DEFAULTS: ResolvedModuleOptions = {
   immutablePaths: ['/_nuxt/**'],
   apiPaths: ['/api/**'],
   serviceWorkerPath: '/service-worker.js',
-  pollIntervalMs: 60_000,
+  pollIntervalMs: 0,
   cooldownMs: 10_000,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 60_000 },
   skipInDev: true,

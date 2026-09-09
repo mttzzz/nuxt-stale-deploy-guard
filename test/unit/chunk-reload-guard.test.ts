@@ -253,14 +253,14 @@ describe('мульти-проба (mixed-pods при replicas>=2, инциден
   it('первая проба видит свой buildId (старый под), вторая — новый → reload', async () => {
     const reload = vi.fn<() => void>()
     const answers = ['v1', 'v2']
-    const fetchServerBuildId = vi.fn(async () => answers.shift() ?? 'v2')
+    const fetchServerBuildId = vi.fn(() => Promise.resolve(answers.shift() ?? 'v2'))
     const guard = createChunkReloadGuard({
       getBuildId: () => 'v1',
       reload,
       fetchServerBuildId,
       now: () => Date.now(),
       storage: createFakeStorage(),
-      dispatchBlocked: vi.fn(),
+      dispatchBlocked: vi.fn<(detail: ChunkReloadBlockedDetail) => void>(),
       sleep: async () => {},
     })
 
@@ -272,14 +272,14 @@ describe('мульти-проба (mixed-pods при replicas>=2, инциден
 
   it('все пробы совпали со своим buildId → все PROBE_COUNT проб исчерпаны, reload нет', async () => {
     const reload = vi.fn<() => void>()
-    const fetchServerBuildId = vi.fn(async () => 'v1')
+    const fetchServerBuildId = vi.fn(() => Promise.resolve('v1'))
     const guard = createChunkReloadGuard({
       getBuildId: () => 'v1',
       reload,
       fetchServerBuildId,
       now: () => Date.now(),
       storage: createFakeStorage(),
-      dispatchBlocked: vi.fn(),
+      dispatchBlocked: vi.fn<(detail: ChunkReloadBlockedDetail) => void>(),
       sleep: async () => {},
     })
 
@@ -291,22 +291,89 @@ describe('мульти-проба (mixed-pods при replicas>=2, инциден
 
   it('пробы получают индекс попытки — плагин добавляет по нему cache-buster', async () => {
     const seen: unknown[] = []
-    const fetchServerBuildId = vi.fn(async (_path: string, attempt?: number) => {
+    const fetchServerBuildId = vi.fn((_path: string, attempt?: number) => {
       seen.push(attempt)
-      return 'v1'
+      return Promise.resolve('v1')
     })
     const guard = createChunkReloadGuard({
       getBuildId: () => 'v1',
-      reload: vi.fn(),
+      reload: vi.fn<() => void>(),
       fetchServerBuildId,
       now: () => Date.now(),
       storage: createFakeStorage(),
-      dispatchBlocked: vi.fn(),
+      dispatchBlocked: vi.fn<(detail: ChunkReloadBlockedDetail) => void>(),
       sleep: async () => {},
     })
 
     await guard.verifyAndReload()
 
     expect(seen).toEqual([0, 1, 2, 3])
+  })
+})
+
+/* Проактивный вердикт (poll) — для РАБОТАЮЩЕЙ вкладки. «Хоть одна проба» здесь ложный:
+   в окне rolling-деплоя (ai.pushka.biz 09.09.2026, replicas=2, maxSurge=1) вкладка на НОВОМ
+   билде видела старый под, перезагружалась и с вероятностью 2/3 приезжала на старый билд —
+   цикл до circuit breaker'а. Reload только при схождении флота. */
+describe('verifyConvergedAndReload — проактивный вердикт по схождению флота', () => {
+  function setupConverged(answers: string[], buildId = 'v1') {
+    const reload = vi.fn<() => void>()
+    const queue = [...answers]
+    const fetchServerBuildId = vi.fn(() => {
+      const next = queue.shift()
+      return next === undefined ? Promise.reject(new Error('probe overflow')) : Promise.resolve(next)
+    })
+    const guard = createChunkReloadGuard({
+      getBuildId: () => buildId,
+      reload,
+      fetchServerBuildId,
+      now: () => Date.now(),
+      storage: createFakeStorage(),
+      dispatchBlocked: vi.fn<(detail: ChunkReloadBlockedDetail) => void>(),
+      sleep: async () => {},
+    })
+    return { guard, reload, fetchServerBuildId }
+  }
+
+  it('все пробы — один и тот же чужой id → reload', async () => {
+    const { guard, reload, fetchServerBuildId } = setupConverged(['v2', 'v2', 'v2', 'v2'])
+    await guard.verifyConvergedAndReload()
+    expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('смешанные пробы (окно rolling: старый и новый под) → НЕТ reload', async () => {
+    const { guard, reload, fetchServerBuildId } = setupConverged(['v2', 'v1', 'v2', 'v2'])
+    await guard.verifyConvergedAndReload()
+    /* Ранний выход по первому чужому id — реактивный режим; здесь пробы идут до конца. */
+    expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('все пробы — свой id → НЕТ reload', async () => {
+    const { guard, reload } = setupConverged(['v1', 'v1', 'v1', 'v1'])
+    await guard.verifyConvergedAndReload()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('одна проба упала/пустая при остальных чужих → НЕТ reload (схождение не доказано)', async () => {
+    const { guard, reload } = setupConverged(['v2', '', 'v2', 'v2'])
+    await guard.verifyConvergedAndReload()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('два разных чужих id (три билда в окне) → НЕТ reload', async () => {
+    const { guard, reload } = setupConverged(['v2', 'v3', 'v2', 'v2'])
+    await guard.verifyConvergedAndReload()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('cooldown после reload общий с реактивным вердиктом', async () => {
+    const { guard, reload, fetchServerBuildId } = setupConverged(['v2', 'v2', 'v2', 'v2', 'v2'])
+    await guard.verifyConvergedAndReload()
+    expect(reload).toHaveBeenCalledOnce()
+    await guard.verifyAndReload()
+    expect(fetchServerBuildId).toHaveBeenCalledTimes(CHUNK_RELOAD_PROBES)
+    expect(reload).toHaveBeenCalledOnce()
   })
 })

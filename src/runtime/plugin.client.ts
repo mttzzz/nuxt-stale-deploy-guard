@@ -1,4 +1,4 @@
-import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from '#app'
+import { defineNuxtPlugin, reloadNuxtApp, useRuntimeConfig } from '#app'
 
 import { createChunkReloadGuard } from './chunk-reload-guard'
 import { createSafeSessionStorage } from './safe-storage'
@@ -8,6 +8,14 @@ import { isStaleChunkError } from './stale-chunk'
  * Клиентский Nuxt-плагин, оборачивающий чистый `createChunkReloadGuard` в реальные
  * хуки/события. Все каналы детекта stale-chunk идут через один guard — cooldown
  * и circuit-breaker одни на все источники.
+ *
+ * Reload — только по ДОКАЗАТЕЛЬСТВУ, что вкладка сломана (stale-chunk ошибка), плюс опциональный
+ * poll с вердиктом «флот сошёлся». Пассивных триггеров (app:mounted, online, visibilitychange,
+ * router.beforeEach) больше нет: они перезагружали РАБОТАЮЩУЮ вкладку при любой пробе с чужим id —
+ * посреди чтения и набора текста, на каждой выкатке, а на возврате ноутбука из сна ещё и в окно
+ * rolling-деплоя, где вердикт «хоть одна проба» ложный (ai.pushka.biz 09.09.2026, «чат вылетает»).
+ * Старой вкладке с immutable-ассетами на CDN reload не нужен вовсе; о новой версии консьюмер
+ * сообщает сам (Nuxt app:manifest:update → тост).
  *
  * Build-id берём из `runtimeConfig.app.buildId` (Nuxt автогенерит).
  * Server build-id фетчим HEAD-запросом по текущему URL и читаем header
@@ -55,7 +63,6 @@ function makeFetchServerBuildId(headerName: string) {
 export default defineNuxtPlugin((nuxtApp) => {
   const config = useRuntimeConfig()
   const opts = config.public.staleDeployGuard!
-  const router = useRouter()
 
   const guard = createChunkReloadGuard({
     getBuildId: () => (typeof config.app.buildId === 'string' ? config.app.buildId : ''),
@@ -108,27 +115,14 @@ export default defineNuxtPlugin((nuxtApp) => {
     void guard.verifyAndReload()
   })
 
-  router.beforeEach((to, from) => {
-    if (to.fullPath !== from.fullPath) {
-      void guard.verifyAndReload(to.fullPath)
-    }
-  })
-
-  nuxtApp.hook('app:mounted', () => {
-    void guard.verifyAndReload(getCurrentLocationPath())
-
-    globalThis.addEventListener('online', () => {
-      void guard.verifyAndReload(getCurrentLocationPath())
-    })
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        void guard.verifyAndReload(getCurrentLocationPath())
-      }
-    })
-    if (opts.pollIntervalMs > 0) {
+  /* Опциональный poll: единственный проактивный триггер. Вердикт — схождение флота (все пробы
+     единогласно на одном чужом id), иначе в окне rolling вкладка на новом билде уезжала бы на
+     старый. Дефолт 0 — выключен. */
+  if (opts.pollIntervalMs > 0) {
+    nuxtApp.hook('app:mounted', () => {
       globalThis.setInterval(() => {
-        void guard.verifyAndReload(getCurrentLocationPath())
+        void guard.verifyConvergedAndReload(getCurrentLocationPath())
       }, opts.pollIntervalMs)
-    }
-  })
+    })
+  }
 })

@@ -21,6 +21,7 @@ export interface ChunkReloadDeps {
 }
 export interface ChunkReloadGuard {
     verifyAndReload: (path?: string) => Promise<void>;
+    verifyConvergedAndReload: (path?: string) => Promise<void>;
     handleStaleChunkError: (err: unknown, path?: string) => void;
 }
 export declare function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard;
