@@ -7,9 +7,9 @@ export const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
 export const CHUNK_RELOAD_PROBES = 4;
 export const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
 function defaultSleep(ms) {
-  const { promise, resolve } = Promise.withResolvers();
-  setTimeout(resolve, ms);
-  return promise;
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 export function createChunkReloadGuard(deps) {
   let verifyInFlight = false;

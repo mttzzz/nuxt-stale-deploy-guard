@@ -60,9 +60,9 @@ export interface ChunkReloadGuard {
 }
 
 function defaultSleep(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>()
-  setTimeout(resolve, ms)
-  return promise
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard {
