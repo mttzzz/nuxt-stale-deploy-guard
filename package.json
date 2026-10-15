@@ -1,6 +1,6 @@
 {
   "name": "@mttzzz/nuxt-stale-deploy-guard",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Nuxt 4 module: Cache-Control headers + verify-before-reload chunk guard for SPA deploys",
   "license": "MIT",
   "repository": "github:mttzzz/nuxt-stale-deploy-guard",
@@ -55,7 +55,9 @@
     "@nuxt/schema": "^4.4.2",
     "@nuxt/test-utils": "^4.0.3",
     "@types/node": "latest",
+    "acorn": "^8.19.0",
     "changelogen": "^0.6.2",
+    "happy-dom": "^21.0.1",
     "nuxt": "^4.4.2",
     "oxfmt": "^0.49.0",
     "oxlint": "^1.64.0",

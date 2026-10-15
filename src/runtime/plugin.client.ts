@@ -17,6 +17,11 @@ import { isStaleChunkError } from './stale-chunk'
  * Старой вкладке с immutable-ассетами на CDN reload не нужен вовсе; о новой версии консьюмер
  * сообщает сам (Nuxt app:manifest:update → тост).
  *
+ * Каждый канал передаёт в guard исходную ошибку (payload `vite:preloadError`, `reason`
+ * `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из
+ * `app:chunkError`): с ней guard шлёт событие `app:chunk-reload-blocked` на каждый исход «reload не
+ * случится» — подробности в chunk-reload-guard.ts.
+ *
  * Build-id берём из `runtimeConfig.app.buildId` (Nuxt автогенерит).
  * Server build-id фетчим HEAD-запросом по текущему URL и читаем header
  * (имя из `runtimeConfig.public.staleDeployGuard.buildIdHeader`).
@@ -81,8 +86,8 @@ export default defineNuxtPlugin((nuxtApp) => {
     },
   })
 
-  nuxtApp.hook('app:chunkError', () => {
-    void guard.verifyAndReload()
+  nuxtApp.hook('app:chunkError', ({ error }) => {
+    void guard.verifyAndReload(undefined, error)
   })
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('vue:error', (error) => {
@@ -95,7 +100,8 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   globalThis.addEventListener('vite:preloadError', (event) => {
     event.preventDefault()
-    void guard.verifyAndReload()
+    /* Vite кладёт ошибку в `event.payload` (не `detail`). */
+    void guard.verifyAndReload(undefined, 'payload' in event ? event.payload : undefined)
   })
   globalThis.addEventListener('unhandledrejection', (event) => {
     const { reason } = event as { reason?: unknown }
@@ -103,7 +109,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
-    void guard.verifyAndReload()
+    void guard.verifyAndReload(undefined, reason)
   })
   globalThis.addEventListener('error', (event) => {
     const errorLike = event as { error?: unknown; message?: unknown }
@@ -112,7 +118,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
-    void guard.verifyAndReload()
+    void guard.verifyAndReload(undefined, candidate)
   })
 
   /* Опциональный poll: единственный проактивный триггер. Вердикт — схождение флота (все пробы

@@ -8,67 +8,10 @@ import {
   type ChunkReloadBlockedDetail,
   createChunkReloadGuard,
 } from '../../src/runtime/chunk-reload-guard'
+import { createFakeStorage, flushMicrotasks, setup, setupConverged } from './helpers/chunk-reload-guard'
 
 const COOLDOWN_MS = CHUNK_RELOAD_COOLDOWN_MS
 const CIRCUIT_WINDOW_MS = CHUNK_RELOAD_CIRCUIT_WINDOW_MS
-
-function createFakeStorage() {
-  const store = new Map<string, string>()
-  return {
-    getItem: (k: string): string | null => store.get(k) ?? null,
-    setItem: (k: string, v: string): void => {
-      store.set(k, v)
-    },
-    clear: (): void => {
-      store.clear()
-    },
-  }
-}
-
-async function flushMicrotasks() {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
-}
-
-interface GuardSetupOpts {
-  buildId?: string
-  serverId?: string | null
-  fetchFails?: boolean
-  emptyServerId?: boolean
-}
-
-function setup(opts: GuardSetupOpts = {}) {
-  const { buildId = 'v1', serverId = 'v2', fetchFails = false, emptyServerId = false } = opts
-
-  const reload = vi.fn<() => void>()
-  const dispatchBlocked = vi.fn<(detail: ChunkReloadBlockedDetail) => void>()
-  const storage = createFakeStorage()
-  const nowSpy = vi.fn(() => Date.now())
-
-  const fetchServerBuildId = vi.fn((): Promise<string> => {
-    if (fetchFails) {
-      return Promise.reject(new Error('network'))
-    }
-    if (emptyServerId) {
-      return Promise.resolve('')
-    }
-    return Promise.resolve(serverId ?? '')
-  })
-
-  const guard = createChunkReloadGuard({
-    getBuildId: () => buildId,
-    reload,
-    fetchServerBuildId,
-    now: nowSpy,
-    storage,
-    dispatchBlocked,
-    /* Мгновенный sleep: мульти-проба под fake timers иначе зависла бы на реальном setTimeout. */
-    sleep: async () => {},
-  })
-
-  return { guard, reload, dispatchBlocked, storage, fetchServerBuildId, nowSpy }
-}
 
 describe('createChunkReloadGuard', () => {
   beforeEach(() => {
@@ -316,25 +259,6 @@ describe('мульти-проба (mixed-pods при replicas>=2, инциден
    билде видела старый под, перезагружалась и с вероятностью 2/3 приезжала на старый билд —
    цикл до circuit breaker'а. Reload только при схождении флота. */
 describe('verifyConvergedAndReload — проактивный вердикт по схождению флота', () => {
-  function setupConverged(answers: string[], buildId = 'v1') {
-    const reload = vi.fn<() => void>()
-    const queue = [...answers]
-    const fetchServerBuildId = vi.fn(() => {
-      const next = queue.shift()
-      return next === undefined ? Promise.reject(new Error('probe overflow')) : Promise.resolve(next)
-    })
-    const guard = createChunkReloadGuard({
-      getBuildId: () => buildId,
-      reload,
-      fetchServerBuildId,
-      now: () => Date.now(),
-      storage: createFakeStorage(),
-      dispatchBlocked: vi.fn<(detail: ChunkReloadBlockedDetail) => void>(),
-      sleep: async () => {},
-    })
-    return { guard, reload, fetchServerBuildId }
-  }
-
   it('все пробы — один и тот же чужой id → reload', async () => {
     const { guard, reload, fetchServerBuildId } = setupConverged(['v2', 'v2', 'v2', 'v2'])
     await guard.verifyConvergedAndReload()

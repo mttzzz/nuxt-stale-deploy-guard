@@ -54,8 +54,8 @@ export default defineNuxtPlugin((nuxtApp) => {
       globalThis.dispatchEvent(new CustomEvent("app:chunk-reload-blocked", { detail }));
     }
   });
-  nuxtApp.hook("app:chunkError", () => {
-    void guard.verifyAndReload();
+  nuxtApp.hook("app:chunkError", ({ error }) => {
+    void guard.verifyAndReload(void 0, error);
   });
   nuxtApp.hook("vue:error", (error) => {
     guard.handleStaleChunkError(error);
@@ -65,7 +65,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   });
   globalThis.addEventListener("vite:preloadError", (event) => {
     event.preventDefault();
-    void guard.verifyAndReload();
+    void guard.verifyAndReload(void 0, "payload" in event ? event.payload : void 0);
   });
   globalThis.addEventListener("unhandledrejection", (event) => {
     const { reason } = event;
@@ -73,7 +73,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       return;
     }
     event.preventDefault();
-    void guard.verifyAndReload();
+    void guard.verifyAndReload(void 0, reason);
   });
   globalThis.addEventListener("error", (event) => {
     const errorLike = event;
@@ -82,7 +82,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       return;
     }
     event.preventDefault();
-    void guard.verifyAndReload();
+    void guard.verifyAndReload(void 0, candidate);
   });
   if (opts.pollIntervalMs > 0) {
     nuxtApp.hook("app:mounted", () => {

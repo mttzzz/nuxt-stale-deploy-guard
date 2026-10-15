@@ -1,6 +1,7 @@
 import { addPlugin, addServerPlugin, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
 
+import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from './runtime/importmap-check'
 import type { ModuleOptions, ResolvedModuleOptions } from './runtime/types'
 
 export type { ModuleOptions } from './runtime/types'
@@ -90,6 +91,22 @@ export default defineNuxtModule<ModuleOptions>({
     /* 4) Client plugin — в dev пропускаем (см. shouldEnableClientGuard + skipInDev option). */
     if (shouldEnableClientGuard(resolved, nuxt.options.dev)) {
       addPlugin({ src: resolver.resolve('./runtime/plugin.client'), mode: 'client' })
+    }
+
+    /*
+     * 5) Inline-проверка import maps + экран для браузеров без них (iOS < 16.4: Nuxt 4.1+ кладёт entry в
+     *    `<script type="importmap">`, без поддержки страница падает на 500 `Module specifier '#entry'`, а
+     *    guard молча глотает ошибку — прод-инцидент ai.pushka.biz 15.10.2026). bodyClose: importmap из head
+     *    уже в DOM, скрипт исполняется при парсинге — раньше deferred module-скриптов entry. Только прод:
+     *    в dev import map нет, а экран «браузер устарел» не должен реагировать на HMR.
+     */
+    if (!nuxt.options.dev) {
+      nuxt.options.app.head.script ??= []
+      nuxt.options.app.head.script.push({
+        key: IMPORTMAP_CHECK_SCRIPT_KEY,
+        innerHTML: IMPORTMAP_CHECK_SCRIPT,
+        tagPosition: 'bodyClose',
+      })
     }
   },
 })

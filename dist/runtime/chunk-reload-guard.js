@@ -61,12 +61,14 @@ export function createChunkReloadGuard(deps) {
     }
     return probe(0, []);
   }
-  async function verify(path, decide, stopOnMismatch) {
+  async function verify(path, decide, stopOnMismatch, reportBlocked) {
     const currentBuildId = deps.getBuildId();
     if (!currentBuildId) {
+      reportBlocked?.({ reason: "no-build-id" });
       return;
     }
     if (inCooldown()) {
+      reportBlocked?.({ reason: "cooldown", buildId: currentBuildId });
       return;
     }
     if (verifyInFlight) {
@@ -76,12 +78,15 @@ export function createChunkReloadGuard(deps) {
     try {
       const probes = await collectProbes(path, stopOnMismatch, currentBuildId);
       if (!decide(probes, currentBuildId)) {
+        reportBlocked?.({ reason: "not-stale", probes, buildId: currentBuildId });
         return;
       }
       const attempts = recordAttemptAndCount();
       if (attempts > CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS) {
-        deps.dispatchBlocked({
+        reportBlocked?.({
           reason: "circuit-breaker",
+          probes,
+          buildId: currentBuildId,
           attempts,
           windowMs: CHUNK_RELOAD_CIRCUIT_WINDOW_MS
         });
@@ -93,8 +98,15 @@ export function createChunkReloadGuard(deps) {
       verifyInFlight = false;
     }
   }
-  function verifyAndReload(path = "") {
-    return verify(path, (probes, currentBuildId) => probes.some((id) => id !== "" && id !== currentBuildId), true);
+  function verifyAndReload(path, error) {
+    return verify(
+      path,
+      (probes, currentBuildId) => probes.some((id) => id !== "" && id !== currentBuildId),
+      true,
+      (fields) => {
+        deps.dispatchBlocked({ ...fields, error });
+      }
+    );
   }
   function verifyConvergedAndReload(path = "") {
     return verify(
@@ -108,11 +120,11 @@ export function createChunkReloadGuard(deps) {
   }
   function handleStaleChunkError(err, path = "") {
     if (isStaleChunkError(err)) {
-      void verifyAndReload(path);
+      void verifyAndReload(path, err);
     }
   }
   return {
-    verifyAndReload: (path) => verifyAndReload(path ?? ""),
+    verifyAndReload: (path, error) => verifyAndReload(path ?? "", error),
     verifyConvergedAndReload: (path) => verifyConvergedAndReload(path ?? ""),
     handleStaleChunkError: (err, path) => {
       handleStaleChunkError(err, path ?? "");

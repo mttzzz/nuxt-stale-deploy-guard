@@ -2,12 +2,11 @@
 const { data } = await useFetch('/api/foo')
 const config = useRuntimeConfig()
 
+/* Как настоящий Vite: cancelable Event с ошибкой в `payload` (не в `detail`) — guard читает именно её. */
 function triggerVitePreloadError() {
-  globalThis.dispatchEvent(
-    new CustomEvent('vite:preloadError', {
-      detail: new Error('Failed to fetch dynamically imported module'),
-    }),
-  )
+  const event = new Event('vite:preloadError', { cancelable: true })
+  Object.assign(event, { payload: new Error('Failed to fetch dynamically imported module') })
+  globalThis.dispatchEvent(event)
 }
 </script>
 

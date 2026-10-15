@@ -5,11 +5,42 @@ export declare const CHUNK_RELOAD_CIRCUIT_WINDOW_MS: number;
 export declare const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
 export declare const CHUNK_RELOAD_PROBES = 4;
 export declare const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
-export interface ChunkReloadBlockedDetail {
+/** Реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем. */
+export interface NotStaleBlockedDetail {
+    reason: 'not-stale';
+    error: unknown;
+    probes: string[];
+    buildId: string;
+}
+/** Реактивная верификация хотела reload, circuit breaker запретил. */
+export interface CircuitBreakerBlockedDetail {
     reason: 'circuit-breaker';
+    error: unknown;
+    probes: string[];
+    buildId: string;
     attempts: number;
     windowMs: number;
 }
+/** Реактивная верификация пропущена: идёт cooldown после reload (чанк упал сразу после перезагрузки). */
+export interface CooldownBlockedDetail {
+    reason: 'cooldown';
+    error: unknown;
+    buildId: string;
+}
+/** Реактивная верификация пропущена: у клиента нет build-id. */
+export interface NoBuildIdBlockedDetail {
+    reason: 'no-build-id';
+    error: unknown;
+}
+/** Inline-скрипт (bodyClose, до `window.stop()`): браузер без import maps, приложение не стартует. */
+export interface UnsupportedBrowserBlockedDetail {
+    reason: 'unsupported-browser';
+    missing: 'importmap';
+}
+/** Исходы реактивной верификации — то, что `createChunkReloadGuard` шлёт через `deps.dispatchBlocked`. */
+export type ChunkReloadBlockedDetail = NotStaleBlockedDetail | CircuitBreakerBlockedDetail | CooldownBlockedDetail | NoBuildIdBlockedDetail;
+/** Полный detail события `app:chunk-reload-blocked` на window: исходы guard + inline-скрипт. */
+export type ChunkReloadBlockedEventDetail = ChunkReloadBlockedDetail | UnsupportedBrowserBlockedDetail;
 export interface ChunkReloadDeps {
     getBuildId: () => string;
     reload: () => void;
@@ -20,7 +51,7 @@ export interface ChunkReloadDeps {
     dispatchBlocked: (detail: ChunkReloadBlockedDetail) => void;
 }
 export interface ChunkReloadGuard {
-    verifyAndReload: (path?: string) => Promise<void>;
+    verifyAndReload: (path?: string, error?: unknown) => Promise<void>;
     verifyConvergedAndReload: (path?: string) => Promise<void>;
     handleStaleChunkError: (err: unknown, path?: string) => void;
 }
