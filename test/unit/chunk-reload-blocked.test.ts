@@ -77,22 +77,36 @@ describe('реактивная верификация — каждый исхо�
     })
   })
 
-  it('cooldown: чанк упал сразу после reload → detail со второй ошибкой и buildId, пробы не идут', async () => {
+  it('cooldown: вкладка после reload (тот же sessionStorage) снова уронила чанк → detail с её ошибкой, пробы не идут', async () => {
+    const before = setup({ buildId: 'v1', serverId: 'v2' })
+    await before.guard.verifyAndReload('', chunkError)
+    expect(before.reload).toHaveBeenCalledOnce()
+
+    /* Новая страница — новый guard; cooldown пережил reload в общем sessionStorage. */
+    const after = setup({ buildId: 'v2', serverId: 'v2', storage: before.storage })
+    const afterReloadError = new Error("Couldn't resolve component default")
+    await after.guard.verifyAndReload('', afterReloadError)
+
+    expect(after.fetchServerBuildId).not.toHaveBeenCalled()
+    expect(after.reload).not.toHaveBeenCalled()
+    expect(after.dispatchBlocked).toHaveBeenCalledExactlyOnceWith({
+      reason: 'cooldown',
+      error: afterReloadError,
+      buildId: 'v2',
+    })
+  })
+
+  it('cooldown той же страницы, что вызвала reload (вкладка ещё не выгрузилась) → тишина: иначе событие на каждом деплое', async () => {
     const { guard, reload, dispatchBlocked, fetchServerBuildId } = setup({ buildId: 'v1', serverId: 'v2' })
     await guard.verifyAndReload('', chunkError)
     expect(reload).toHaveBeenCalledOnce()
     const probesBefore = fetchServerBuildId.mock.calls.length
 
-    const afterReloadError = new Error("Couldn't resolve component default")
-    await guard.verifyAndReload('', afterReloadError)
+    await guard.verifyAndReload('', new Error('хвостовая ошибка старой страницы до выгрузки'))
 
     expect(fetchServerBuildId).toHaveBeenCalledTimes(probesBefore)
     expect(reload).toHaveBeenCalledOnce()
-    expect(dispatchBlocked).toHaveBeenCalledExactlyOnceWith({
-      reason: 'cooldown',
-      error: afterReloadError,
-      buildId: 'v1',
-    })
+    expect(dispatchBlocked).not.toHaveBeenCalled()
   })
 
   it('no-build-id: у клиента нет build-id → detail только с ошибкой, пробы не идут', async () => {
@@ -200,14 +214,17 @@ describe('poll (verifyConvergedAndReload) молчит: app:chunk-reload-blocked
     expect(dispatchBlocked).not.toHaveBeenCalled()
   })
 
-  it('реактивная ошибка сразу после poll-reload сообщает cooldown: poll молчит, реактивный вердикт — нет', async () => {
-    const { guard, reload, dispatchBlocked } = setupConverged(['v2', 'v2', 'v2', 'v2'])
-    await guard.verifyConvergedAndReload()
-    expect(reload).toHaveBeenCalledOnce()
+  it('после poll-reload: та же страница молчит, следующая сообщает cooldown реактивной ошибки', async () => {
+    const before = setupConverged(['v2', 'v2', 'v2', 'v2'])
+    await before.guard.verifyConvergedAndReload()
+    expect(before.reload).toHaveBeenCalledOnce()
 
+    await before.guard.verifyAndReload('', new Error('хвостовая ошибка старой страницы до выгрузки'))
+    expect(before.dispatchBlocked).not.toHaveBeenCalled()
+
+    const after = setup({ buildId: 'v2', serverId: 'v2', storage: before.storage })
     const error = new Error("Couldn't resolve component default")
-    await guard.verifyAndReload('', error)
-
-    expect(dispatchBlocked).toHaveBeenCalledExactlyOnceWith({ reason: 'cooldown', error, buildId: 'v1' })
+    await after.guard.verifyAndReload('', error)
+    expect(after.dispatchBlocked).toHaveBeenCalledExactlyOnceWith({ reason: 'cooldown', error, buildId: 'v2' })
   })
 })

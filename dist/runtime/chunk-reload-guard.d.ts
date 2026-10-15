@@ -21,7 +21,8 @@ export interface CircuitBreakerBlockedDetail {
     attempts: number;
     windowMs: number;
 }
-/** Реактивная верификация пропущена: идёт cooldown после reload (чанк упал сразу после перезагрузки). */
+/** Реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на НОВОЙ странице
+ *  (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
 export interface CooldownBlockedDetail {
     reason: 'cooldown';
     error: unknown;

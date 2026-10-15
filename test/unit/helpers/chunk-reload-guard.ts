@@ -4,7 +4,13 @@ import { type ChunkReloadBlockedDetail, createChunkReloadGuard } from '../../../
 
 /* Общая оснастка unit-тестов guard'а (chunk-reload-guard.test.ts, chunk-reload-blocked.test.ts). */
 
-export function createFakeStorage() {
+export interface FakeStorage {
+  getItem: (k: string) => string | null
+  setItem: (k: string, v: string) => void
+  clear: () => void
+}
+
+export function createFakeStorage(): FakeStorage {
   const store = new Map<string, string>()
   return {
     getItem: (k: string): string | null => store.get(k) ?? null,
@@ -43,6 +49,8 @@ export interface GuardSetupOpts {
   serverId?: string | null
   fetchFails?: boolean
   emptyServerId?: boolean
+  /* SessionStorage прошлой страницы: второй guard на нём — вкладка после reload. */
+  storage?: FakeStorage
 }
 
 export function setup(opts: GuardSetupOpts = {}) {
@@ -50,7 +58,7 @@ export function setup(opts: GuardSetupOpts = {}) {
 
   const reload = vi.fn<() => void>()
   const dispatchBlocked = vi.fn<(detail: ChunkReloadBlockedDetail) => void>()
-  const storage = createFakeStorage()
+  const storage = opts.storage ?? createFakeStorage()
   const nowSpy = vi.fn(() => Date.now())
 
   const fetchServerBuildId = vi.fn((): Promise<string> => {
@@ -86,14 +94,15 @@ export function setupConverged(answers: string[], buildId = 'v1') {
     const next = queue.shift()
     return next === undefined ? Promise.reject(new Error('probe overflow')) : Promise.resolve(next)
   })
+  const storage = createFakeStorage()
   const guard = createChunkReloadGuard({
     getBuildId: () => buildId,
     reload,
     fetchServerBuildId,
     now: () => Date.now(),
-    storage: createFakeStorage(),
+    storage,
     dispatchBlocked,
     sleep: async () => {},
   })
-  return { guard, reload, fetchServerBuildId, dispatchBlocked }
+  return { guard, reload, fetchServerBuildId, dispatchBlocked, storage }
 }

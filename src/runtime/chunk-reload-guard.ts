@@ -24,7 +24,11 @@ import { isStaleChunkError } from './stale-chunk'
  *     (вкладка работает), поэтому событий НЕ шлёт ни при каком исходе, включая circuit breaker.
  *   - `handleStaleChunkError(err, path)` — фильтрует известные stale-chunk паттерны
  *     и триггерит verifyAndReload, передавая исходную ошибку.
- *   - Cooldown (10s) + verifyInFlight защищают от параллельных вызовов/race'ов.
+ *   - Cooldown (10s) + verifyInFlight защищают от параллельных вызовов/race'ов. Cooldown, начатый ЭТОЙ
+ *     страницей, событий не шлёт: reload уже вызван, вкладка доживает до выгрузки (навигация не мгновенна),
+ *     и хвостовые ошибки чанков в этом окне — ещё старая страница. Иначе каждая устаревшая вкладка на
+ *     каждом деплое слала бы «чанк упал сразу после перезагрузки». Cooldown в sessionStorage переживает
+ *     reload, флаг в памяти — нет: на новой странице повторный сбой сообщается как `cooldown`.
  *   - Circuit breaker (3 reload'а в окне 5 мин) предотвращает бесконечный flash;
  *     на 4-й попытке реактивный вердикт дёргает `dispatchBlocked`, чтобы слушатель
  *     (error-boundary, Sentry) узнал, что вкладка осталась без reload'а.
@@ -72,7 +76,8 @@ export interface CircuitBreakerBlockedDetail {
   windowMs: number
 }
 
-/** Реактивная верификация пропущена: идёт cooldown после reload (чанк упал сразу после перезагрузки). */
+/** Реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на НОВОЙ странице
+ *  (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
 export interface CooldownBlockedDetail {
   reason: 'cooldown'
   error: unknown
@@ -132,6 +137,8 @@ function defaultSleep(ms: number): Promise<void> {
 
 export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard {
   let verifyInFlight = false
+  /* Reload вызван этой страницей: до выгрузки её cooldown — не повод для `cooldown` (см. шапку файла). */
+  let reloadRequested = false
 
   function inCooldown(): boolean {
     const raw = deps.storage.getItem(CHUNK_RELOAD_COOLDOWN_KEY)
@@ -202,7 +209,9 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
       return
     }
     if (inCooldown()) {
-      reportBlocked?.({ reason: 'cooldown', buildId: currentBuildId })
+      if (!reloadRequested) {
+        reportBlocked?.({ reason: 'cooldown', buildId: currentBuildId })
+      }
       return
     }
     if (verifyInFlight) {
@@ -230,6 +239,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
       }
 
       markReloadNow()
+      reloadRequested = true
       deps.reload()
     } finally {
       verifyInFlight = false

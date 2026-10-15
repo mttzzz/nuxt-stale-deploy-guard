@@ -13,6 +13,7 @@ function defaultSleep(ms) {
 }
 export function createChunkReloadGuard(deps) {
   let verifyInFlight = false;
+  let reloadRequested = false;
   function inCooldown() {
     const raw = deps.storage.getItem(CHUNK_RELOAD_COOLDOWN_KEY);
     const last = raw ? Number(raw) : 0;
@@ -68,7 +69,9 @@ export function createChunkReloadGuard(deps) {
       return;
     }
     if (inCooldown()) {
-      reportBlocked?.({ reason: "cooldown", buildId: currentBuildId });
+      if (!reloadRequested) {
+        reportBlocked?.({ reason: "cooldown", buildId: currentBuildId });
+      }
       return;
     }
     if (verifyInFlight) {
@@ -93,6 +96,7 @@ export function createChunkReloadGuard(deps) {
         return;
       }
       markReloadNow();
+      reloadRequested = true;
       deps.reload();
     } finally {
       verifyInFlight = false;

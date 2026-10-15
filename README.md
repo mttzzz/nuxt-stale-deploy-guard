@@ -90,13 +90,13 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 
 `detail` — объединение по `reason`:
 
-| `reason`              | Когда                                                                                         | Поля                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем      | `error`, `probes: string[]`, `buildId: string`                       |
-| `circuit-breaker`     | реактивная верификация хотела reload, circuit breaker запретил                                | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
-| `cooldown`            | реактивная верификация пропущена: идёт cooldown после reload (чанк упал сразу после reload'а) | `error`, `buildId`                                                   |
-| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                      | `error`                                                              |
-| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                     | `missing: 'importmap'`                                               |
+| `reason`              | Когда                                                                                           | Поля                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем        | `error`, `probes: string[]`, `buildId: string`                       |
+| `circuit-breaker`     | реактивная верификация хотела reload, circuit breaker запретил                                  | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
+| `cooldown`            | реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на новой странице | `error`, `buildId`                                                   |
+| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                        | `error`                                                              |
+| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                       | `missing: 'importmap'`                                               |
 
 `error` — исходная ошибка/значение, запустившее верификацию: payload `vite:preloadError`, `reason`
 `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из хука
@@ -107,6 +107,8 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 
 - при reload — вкладку лечит сам reload;
 - когда вызов упёрся в идущую верификацию (`verifyInFlight`): свой исход отправит она;
+- в cooldown страницы, которая сама вызвала reload: вкладка доживает до выгрузки, и хвостовые ошибки чанков —
+  ещё старая страница (иначе каждая устаревшая вкладка слала бы событие на каждом деплое);
 - poll-вердиктом (`pollIntervalMs > 0`) — ни при каком исходе, включая его circuit breaker.
 
 Событие `unsupported-browser` приходит до старта приложения (Nuxt-плагины не запускаются вовсе), поэтому
