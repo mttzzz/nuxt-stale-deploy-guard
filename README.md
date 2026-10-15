@@ -132,9 +132,10 @@ Nuxt 4.1+ кладёт entry в `<script type="importmap">` под ключом 
    целями без поддержки import maps) — выходит, страница не затронута.
 2. `HTMLScriptElement.supports('importmap') === true` — выходит. Метода нет или он вернул не `true` — браузер
    без import maps.
-3. Шлёт `app:chunk-reload-blocked` с `{ reason: 'unsupported-browser', missing: 'importmap' }`.
-4. Вызывает `window.stop()`: парсер прерывается, module-скрипты entry не исполняются, **приложение не
+3. Вызывает `window.stop()`: парсер прерывается, module-скрипты entry не исполняются, **приложение не
    стартует** (ни hydration, ни Sentry SDK).
+4. Шлёт `app:chunk-reload-blocked` с `{ reason: 'unsupported-browser', missing: 'importmap' }` — именно после
+   остановки: запрос-отчёт, начатый слушателем уже после `window.stop()`, ею не обрывается ни в каком движке.
 5. Рисует экран на всю страницу (fixed, `z-index: 2147483647`):
    - iPhone/iPad (`iPhone|iPad|iPod` в UA либо `Macintosh` + `maxTouchPoints > 1`): «Версия iOS устарела»,
      «Нужна iOS 16.4 или новее: Настройки → Основные → Обновление ПО. Другой браузер на этом устройстве не

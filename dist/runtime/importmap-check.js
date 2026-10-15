@@ -13,6 +13,11 @@ export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
   var EVENT_NAME = 'app:chunk-reload-blocked';
   var detail = { reason: 'unsupported-browser', missing: 'importmap' };
   try {
+    if (win.stop) {
+      win.stop();
+    }
+  } catch (e) {}
+  try {
     var evt;
     try {
       evt = new CustomEvent(EVENT_NAME, { detail: detail });
@@ -21,11 +26,6 @@ export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
       evt.initCustomEvent(EVENT_NAME, false, false, detail);
     }
     win.dispatchEvent(evt);
-  } catch (e) {}
-  try {
-    if (win.stop) {
-      win.stop();
-    }
   } catch (e) {}
 
   var ua = navigator.userAgent || '';

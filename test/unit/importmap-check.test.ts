@@ -49,7 +49,7 @@ interface Page {
   document: Window['document']
   /* Detail каждого события `app:chunk-reload-blocked`, по порядку. */
   details: unknown[]
-  /* Порядок «событие → stop» — часть контракта: слушатель успевает собрать отчёт до остановки парсера. */
+  /* Порядок «stop → событие» — часть контракта: отчёт, начатый слушателем после остановки, ею не обрывается. */
   order: string[]
   writeText: Mock<(text: string) => Promise<void>>
   execCommand: Mock<(command: string) => boolean>
@@ -192,11 +192,11 @@ describe('inline-проверка import maps — браузер без подд
   it.each([
     ['supports вернул false (Safari 16.0–16.3, Firefox 94–107)', false],
     ['метода supports нет вовсе (Safari < 16)', 'missing'],
-  ] as const)('%s → событие ДО window.stop(), stop вызван, экран в DOM', (_name, supports) => {
+  ] as const)('%s → window.stop(), затем событие, экран в DOM', (_name, supports) => {
     const page = createPage({ supports })
     page.run()
     expect(page.details).toEqual([UNSUPPORTED_DETAIL])
-    expect(page.order).toEqual(['event', 'stop'])
+    expect(page.order).toEqual(['stop', 'event'])
     expect(page.stop).toHaveBeenCalledOnce()
     expect(screenOf(page)).not.toBeNull()
   })
@@ -215,7 +215,7 @@ describe('inline-проверка import maps — браузер без подд
     Object.defineProperty(page.window, 'CustomEvent', { value: ThrowingCustomEvent, configurable: true })
     page.run()
     expect(page.details).toEqual([UNSUPPORTED_DETAIL])
-    expect(page.order).toEqual(['event', 'stop'])
+    expect(page.order).toEqual(['stop', 'event'])
     expect(screenOf(page)).not.toBeNull()
   })
 

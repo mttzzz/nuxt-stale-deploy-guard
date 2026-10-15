@@ -90,7 +90,7 @@ export interface NoBuildIdBlockedDetail {
   error: unknown
 }
 
-/** Inline-скрипт (bodyClose, до `window.stop()`): браузер без import maps, приложение не стартует. */
+/** Inline-скрипт (bodyClose, сразу после `window.stop()`): браузер без import maps, приложение не стартует. */
 export interface UnsupportedBrowserBlockedDetail {
   reason: 'unsupported-browser'
   missing: 'importmap'

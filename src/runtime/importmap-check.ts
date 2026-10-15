@@ -14,13 +14,15 @@
  *      entry грузится без import map, приложение работает).
  *   2. `HTMLScriptElement.supports('importmap') === true` → выход. Метода нет ИЛИ он вернул не `true` —
  *      браузер без import maps.
- *   3. Событие `app:chunk-reload-blocked` с `UnsupportedBrowserBlockedDetail`
+ *   3. `window.stop()`: парсер прерывается, deferred module-скрипты entry не исполняются, приложение не
+ *      стартует (SDK тоже — поэтому отчёт шлёт ранний inline-слушатель nuxt-sentry, а не клиентский плагин).
+ *   4. Событие `app:chunk-reload-blocked` с `UnsupportedBrowserBlockedDetail`
  *      (`{ reason: 'unsupported-browser', missing: 'importmap' }`, контракт — chunk-reload-guard.ts)
- *      ДО `window.stop()`: слушатель (ранний inline-скрипт nuxt-sentry) успевает отправить отчёт — запросы
- *      sendBeacon/fetch keepalive, ушедшие из слушателя, `window.stop()` не обрывает (проверено в Chromium 152).
- *      Фолбэк `createEvent('CustomEvent')` — для браузеров без конструктора CustomEvent.
- *   4. `window.stop()`: парсер прерывается, deferred module-скрипты entry не исполняются, приложение не
- *      стартует (SDK тоже — поэтому отчёт шлёт именно ранний слушатель, а не клиентский плагин).
+ *      ПОСЛЕ `window.stop()`: запрос, начатый слушателем уже после остановки, ею не обрывается ни в каком
+ *      движке. Обратный порядок (отчёт до stop) держался на том, что движок не отменяет keepalive-запрос,
+ *      уже ушедший в сеть, — в Chromium так, но под перехватом запросов (DevTools/Playwright) beacon
+ *      обрывался (выкатка 15.10.2026), а WebKit iOS < 16.4, ради которого отчёт и нужен, проверить
+ *      нечем. Фолбэк `createEvent('CustomEvent')` — для браузеров без конструктора CustomEvent.
  *   5. Экран: fixed-оверлей на весь экран (`z-index: 2147483647`), DOM через `createElement`/`textContent`
  *      (не innerHTML), цвета и стили — CSSOM (`style.cssText`), CSP `style-src` их не блокирует.
  *
@@ -60,6 +62,11 @@ export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
   var EVENT_NAME = 'app:chunk-reload-blocked';
   var detail = { reason: 'unsupported-browser', missing: 'importmap' };
   try {
+    if (win.stop) {
+      win.stop();
+    }
+  } catch (e) {}
+  try {
     var evt;
     try {
       evt = new CustomEvent(EVENT_NAME, { detail: detail });
@@ -68,11 +75,6 @@ export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
       evt.initCustomEvent(EVENT_NAME, false, false, detail);
     }
     win.dispatchEvent(evt);
-  } catch (e) {}
-  try {
-    if (win.stop) {
-      win.stop();
-    }
   } catch (e) {}
 
   var ua = navigator.userAgent || '';
