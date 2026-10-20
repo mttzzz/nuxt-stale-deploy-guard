@@ -38,10 +38,22 @@ export interface UnsupportedBrowserBlockedDetail {
     reason: 'unsupported-browser';
     missing: 'importmap';
 }
+/** Что не загрузилось при `retry-failed`: чанк страницы (динамический импорт) или entry (`<script type="module">`). */
+export type RetryFailedKind = 'chunk' | 'entry';
+/** Inline-скрипт `dead-load.ts` (head): страница не загрузилась до `app:mounted` и после автоперезагрузки
+ *  (в URL уже есть маркер `sdg-retry`) — показан экран «Страница не загрузилась». `error` — исходная
+ *  ошибка/payload, если она есть (у сбоя entry её нет: событие `error` скрипта ошибки не несёт); `url` —
+ *  адрес скрипта entry, который не загрузился. Приходит ровно один раз за загрузку страницы. */
+export interface RetryFailedBlockedDetail {
+    reason: 'retry-failed';
+    kind: RetryFailedKind;
+    error?: unknown;
+    url?: string;
+}
 /** Исходы реактивной верификации — то, что `createChunkReloadGuard` шлёт через `deps.dispatchBlocked`. */
 export type ChunkReloadBlockedDetail = NotStaleBlockedDetail | CircuitBreakerBlockedDetail | CooldownBlockedDetail | NoBuildIdBlockedDetail;
-/** Полный detail события `app:chunk-reload-blocked` на window: исходы guard + inline-скрипт. */
-export type ChunkReloadBlockedEventDetail = ChunkReloadBlockedDetail | UnsupportedBrowserBlockedDetail;
+/** Полный detail события `app:chunk-reload-blocked` на window: исходы guard + inline-скрипты. */
+export type ChunkReloadBlockedEventDetail = ChunkReloadBlockedDetail | UnsupportedBrowserBlockedDetail | RetryFailedBlockedDetail;
 export interface ChunkReloadDeps {
     getBuildId: () => string;
     reload: () => void;

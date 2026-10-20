@@ -1,6 +1,7 @@
-import { defineNuxtPlugin, reloadNuxtApp, useRuntimeConfig } from '#app'
+import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from '#app'
 
 import { createChunkReloadGuard } from './chunk-reload-guard'
+import { readDeadLoadBridge, RETRY_MARKER_KEY } from './dead-load-bridge'
 import { createSafeSessionStorage } from './safe-storage'
 import { isStaleChunkError } from './stale-chunk'
 
@@ -21,6 +22,14 @@ import { isStaleChunkError } from './stale-chunk'
  * `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из
  * `app:chunkError`): с ней guard шлёт событие `app:chunk-reload-blocked` на каждый исход «reload не
  * случится» — подробности в chunk-reload-guard.ts.
+ *
+ * Сбой чанка ДО `app:mounted` (pre-mount) ведёт не guard, а inline-скрипт `dead-load.ts` из head: мост
+ * `window.__sdgDeadLoad` (`dead-load-bridge.ts`) принимает `fail('chunk', error)` из тех же каналов и решает
+ * сразу, без HEAD-проб — автоповтор страницы с маркером `sdg-retry` либо экран «Страница не загрузилась».
+ * Зачем: `nuxt:router` (enforce: 'pre') стартует первую навигацию раньше этого плагина, и транзитный сбой
+ * первого чанка оставлял вкладку мёртвой на странице ошибки Nuxt. На `app:mounted` плагин сообщает мосту
+ * `mounted()` и убирает из URL ключ `sdg-retry` (`router.replace`, прочие query и hash на месте); с этого
+ * момента каналы работают как всегда — через guard. Нет моста (dev, старый HTML) — плагин как раньше.
  *
  * Build-id берём из `runtimeConfig.app.buildId` (Nuxt автогенерит).
  * Server build-id фетчим HEAD-запросом по текущему URL и читаем header
@@ -68,6 +77,10 @@ function makeFetchServerBuildId(headerName: string) {
 export default defineNuxtPlugin((nuxtApp) => {
   const config = useRuntimeConfig()
   const opts = config.public.staleDeployGuard!
+  const router = useRouter()
+  /* Мост inline-скрипта dead-load: есть только в проде. Нет моста — pre-mount ничем не отличается от post-mount. */
+  const deadLoad = readDeadLoadBridge()
+  let mounted = false
 
   const guard = createChunkReloadGuard({
     getBuildId: () => (typeof config.app.buildId === 'string' ? config.app.buildId : ''),
@@ -86,22 +99,67 @@ export default defineNuxtPlugin((nuxtApp) => {
     },
   })
 
+  /* Сбой чанка до app:mounted уходит inline-скрипту (повтор страницы или экран «не загрузилась»), guard тут
+     не нужен: true — сбой передан. После монтирования и без моста — false, каналы идут прежним путём. */
+  function handOverBeforeMount(error: unknown): boolean {
+    if (!deadLoad || mounted) {
+      return false
+    }
+    deadLoad.fail('chunk', error)
+    return true
+  }
+
+  /* Страница загрузилась — маркер автоповтора в адресе больше не нужен. Убирается ТОЛЬКО ключ `sdg-retry`:
+     прочие query и hash остаются. */
+  async function dropRetryMarker(): Promise<void> {
+    const route = router.currentRoute.value
+    if (!(RETRY_MARKER_KEY in route.query)) {
+      return
+    }
+    const query = Object.fromEntries(Object.entries(route.query).filter(([key]) => key !== RETRY_MARKER_KEY))
+    try {
+      await router.replace({ path: route.path, query, hash: route.hash })
+    } catch {
+      /* Не вышло убрать маркер — косметика: страница уже загружена, он останется в адресе до следующей навигации. */
+    }
+  }
+
   nuxtApp.hook('app:chunkError', ({ error }) => {
+    if (handOverBeforeMount(error)) {
+      return
+    }
     void guard.verifyAndReload(undefined, error)
   })
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('vue:error', (error) => {
+    if (isStaleChunkError(error) && handOverBeforeMount(error)) {
+      return
+    }
     guard.handleStaleChunkError(error)
   })
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('app:error', (error) => {
+    if (isStaleChunkError(error) && handOverBeforeMount(error)) {
+      return
+    }
     guard.handleStaleChunkError(error)
+  })
+  nuxtApp.hook('app:mounted', () => {
+    mounted = true
+    if (deadLoad) {
+      deadLoad.mounted()
+      void dropRetryMarker()
+    }
   })
 
   globalThis.addEventListener('vite:preloadError', (event) => {
     event.preventDefault()
     /* Vite кладёт ошибку в `event.payload` (не `detail`). */
-    void guard.verifyAndReload(undefined, 'payload' in event ? event.payload : undefined)
+    const error: unknown = 'payload' in event ? event.payload : undefined
+    if (handOverBeforeMount(error)) {
+      return
+    }
+    void guard.verifyAndReload(undefined, error)
   })
   globalThis.addEventListener('unhandledrejection', (event) => {
     const { reason } = event as { reason?: unknown }
@@ -109,6 +167,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
+    if (handOverBeforeMount(reason)) {
+      return
+    }
     void guard.verifyAndReload(undefined, reason)
   })
   globalThis.addEventListener('error', (event) => {
@@ -118,6 +179,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
+    if (handOverBeforeMount(candidate)) {
+      return
+    }
     void guard.verifyAndReload(undefined, candidate)
   })
 

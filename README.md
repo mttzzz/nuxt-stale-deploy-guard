@@ -56,7 +56,10 @@ event-shape, имеющим `breadcrumbs`.
   - `/api/**` → `no-store`
   - `/service-worker.js` → `no-cache, no-store, must-revalidate`
 - Эмитит `x-app-build-id` header на каждый response (Nitro plugin).
-- Ловит `vite:preloadError`, `app:chunkError`, `vue:error`, `unhandledrejection`, `error` →
+- Сбой чанка/entry ДО `app:mounted` (первая загрузка страницы) ведёт inline-скрипт из head, без HEAD-проб:
+  один автоповтор страницы с маркером `sdg-retry` в URL, а если и он не помог — экран «Страница не загрузилась»
+  с кнопкой и событие `retry-failed` (см. «Мёртвая первая загрузка» ниже).
+- После монтирования ловит `vite:preloadError`, `app:chunkError`, `vue:error`, `unhandledrejection`, `error` →
   серия HEAD-проб на текущий путь (4 через 400 мс, cache-buster `sdg-probe`) → если ХОТЬ ОДНА
   увидела чужой build-id → reload через `reloadNuxtApp`. Reload только по доказательству, что
   вкладка сломана: работающую вкладку модуль сам не перезагружает.
@@ -90,18 +93,24 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 
 `detail` — объединение по `reason`:
 
-| `reason`              | Когда                                                                                           | Поля                                                                 |
-| --------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем        | `error`, `probes: string[]`, `buildId: string`                       |
-| `circuit-breaker`     | реактивная верификация хотела reload, circuit breaker запретил                                  | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
-| `cooldown`            | реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на новой странице | `error`, `buildId`                                                   |
-| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                        | `error`                                                              |
-| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                       | `missing: 'importmap'`                                               |
+| `reason`              | Когда                                                                                                       | Поля                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем                    | `error`, `probes: string[]`, `buildId: string`                       |
+| `circuit-breaker`     | реактивная верификация хотела reload, circuit breaker запретил                                              | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
+| `cooldown`            | реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на новой странице             | `error`, `buildId`                                                   |
+| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                                    | `error`                                                              |
+| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                                   | `missing: 'importmap'`                                               |
+| `retry-failed`        | inline-скрипт: страница не загрузилась до `app:mounted` и после автоповтора (см. «Мёртвая первая загрузка») | `kind: 'chunk' \| 'entry'`, `error?`, `url?`                         |
 
 `error` — исходная ошибка/значение, запустившее верификацию: payload `vite:preloadError`, `reason`
 `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из хука
 `app:chunkError` (`{ error }`). Ключ есть всегда, значение может быть `undefined`. `probes` — build-id каждой
 пробы (пустая строка — проба упала или ответила без заголовка).
+
+У `retry-failed`: `kind` — что не загрузилось (`'chunk'` — чанк страницы, динамический импорт; `'entry'` —
+`<script type="module" src>` точки входа); `error` — payload `vite:preloadError` или ошибка из хука/слушателя
+плагина, если она есть (у `entry` её нет: событие `error` скрипта ошибки не несёт, ключа в detail нет);
+`url` — адрес не загрузившегося скрипта entry. Событие приходит ровно один раз за загрузку страницы.
 
 Событие НЕ шлётся:
 
@@ -109,10 +118,12 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 - когда вызов упёрся в идущую верификацию (`verifyInFlight`): свой исход отправит она;
 - в cooldown страницы, которая сама вызвала reload: вкладка доживает до выгрузки, и хвостовые ошибки чанков —
   ещё старая страница (иначе каждая устаревшая вкладка слала бы событие на каждом деплое);
-- poll-вердиктом (`pollIntervalMs > 0`) — ни при каком исходе, включая его circuit breaker.
+- poll-вердиктом (`pollIntervalMs > 0`) — ни при каком исходе, включая его circuit breaker;
+- для первого сбоя загрузки страницы (автоповтор с `sdg-retry`): `retry-failed` приходит, только когда повтор не помог.
 
-Событие `unsupported-browser` приходит до старта приложения (Nuxt-плагины не запускаются вовсе), поэтому
-слушать его должен ранний inline-скрипт в `<head>` (`tagPosition: 'head'`), а не клиентский плагин.
+События `unsupported-browser` и `retry-failed` приходят до старта приложения (Nuxt-плагины не запускаются вовсе
+или ещё не зарегистрированы, Sentry SDK может быть не инициализирован), поэтому слушать их должен ранний
+inline-скрипт в `<head>` (`tagPosition: 'head'`), а не клиентский плагин.
 
 ## Экран для браузеров без import maps
 
@@ -133,7 +144,9 @@ Nuxt 4.1+ кладёт entry в `<script type="importmap">` под ключом 
 2. `HTMLScriptElement.supports('importmap') === true` — выходит. Метода нет или он вернул не `true` — браузер
    без import maps.
 3. Вызывает `window.stop()`: парсер прерывается, module-скрипты entry не исполняются, **приложение не
-   стартует** (ни hydration, ни Sentry SDK).
+   стартует** (ни hydration, ни Sentry SDK). Перед остановкой скрипт помечает общее состояние
+   (`window.__sdgDeadLoad.takenOver`): `error` оборванных остановкой скриптов entry не будят скрипт «страница
+   не загрузилась» (см. ниже).
 4. Шлёт `app:chunk-reload-blocked` с `{ reason: 'unsupported-browser', missing: 'importmap' }` — именно после
    остановки: запрос-отчёт, начатый слушателем уже после `window.stop()`, ею не обрывается ни в каком движке.
 5. Рисует экран на всю страницу (fixed, `z-index: 2147483647`):
@@ -154,6 +167,78 @@ Nuxt 4.1+ кладёт entry в `<script type="importmap">` под ключом 
 `createElement`/`textContent`. Это inline-скрипт — как и inline-payload самого Nuxt: при строгом CSP ему нужен
 nonce/hash. Известное ограничение: Chrome/Edge 89–95 поддерживают import maps, но не имеют
 `HTMLScriptElement.supports` (появился в 96) — их «метода нет» тоже приводит к экрану.
+
+## Мёртвая первая загрузка: автоповтор и экран «Страница не загрузилась»
+
+Проблема (Sentry KP-MODMB-COM-1H). Nuxt-плагин `nuxt:router` (`enforce: 'pre'`) запускает первую навигацию внутри
+собственного setup, поэтому динамический импорт чанка страницы падает РАНЬШЕ, чем зарегистрированы плагин guard и
+плагин Sentry. Ретрай в `app:created` может пройти, но Nuxt уже показал «500 — Failed to fetch dynamically imported
+module» и не убирает страницу ошибки (`clearError` в `afterEach` пропускается, пока `isHydrating`). Итог: одна
+транзитная ошибка сети = мёртвая вкладка без кнопки, без HEAD-проб и без события в Sentry; до guard доходит только
+двойной сбой, и тогда пробы видят «билд актуален» и не перезагружают.
+
+Модуль добавляет в `app.head.script` ещё один inline-скрипт (`tagPosition: 'head'`, числовой `tagPriority: -1`,
+ключ `stale-deploy-guard-dead-load`, исходник — `src/runtime/dead-load.ts`). Только в проде (`!nuxt.options.dev`),
+без опций. Он стоит в HTML раньше entry `<script type="module">` (сразу после import map Nuxt, если она есть):
+слушатели готовы до того, как entry начнёт грузиться.
+
+Область — только сбои ДО `app:mounted`. После монтирования всё работает как раньше: HEAD-пробы,
+verify-before-reload, события `not-stale` / `circuit-breaker` / `cooldown` / `no-build-id`.
+
+Триггеры (первый сбой за загрузку страницы побеждает, остальные игнорируются):
+
+| Источник                                                                                                                                             | `kind`  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| событие window `vite:preloadError`                                                                                                                   | `chunk` |
+| сбой в хуках и слушателях клиентского плагина: `app:chunkError`, `app:error`, `vue:error`, `unhandledrejection`, `error` (тот же фильтр stale-chunk) | `chunk` |
+| `error`, пойманный на window в фазе capture, цель которого — `<script type="module" src>`                                                            | `entry` |
+
+Ошибки `<link>` (modulepreload, stylesheet) игнорируются. HEAD-проб нет: скрипт реагирует сразу.
+
+Защита от петли — маркер `sdg-retry` в query URL (значение `chunk` или `entry` — что не загрузилось):
+
+1. Сбой на URL БЕЗ маркера → оверлей «Загружаем страницу…» (`data-sdg-state="loading"`) и `location.replace` на тот
+   же URL + `sdg-retry=<kind>`: путь, прочие query и hash сохраняются. Смена URL заодно обходит HTTP-кеш
+   устаревшего HTML.
+2. Сбой на URL, где маркер уже есть (любое значение) → экран «Страница не загрузилась» (`data-sdg-state="failed"`):
+   заголовок `<h1>`, подсказка «Проверьте подключение к интернету и нажмите «Обновить».» и настоящая кнопка
+   `<button type="button">` «Обновить» — `location.reload()`, маркер остаётся: одно нажатие = одна попытка.
+3. После успешного `app:mounted` клиентский плагин сообщает скрипту `mounted()` и убирает из адреса только ключ
+   `sdg-retry` через `router.replace` (прочие query и hash на месте).
+
+Оформление — как у экрана для браузеров без import maps (общие хелперы — `src/runtime/inline-screen.ts`): fixed
+на весь экран (`z-index: 2147483647`), палитра ai.pushka.biz, ES5, DOM через `createElement`/`textContent`.
+Маркеры для интеграционных проверок: корневой элемент несёт атрибут `data-sdg-dead-load` и
+`data-sdg-state="loading" | "failed"`. Тексты не настраиваются. Если сработал экран «браузер без import maps»
+(`window.stop()`), скрипт не делает ничего: ни повтора, ни второго экрана, ни события.
+
+Что сообщается. На экране «Страница не загрузилась» на window ровно один раз за загрузку страницы уходит
+`app:chunk-reload-blocked` с `{ reason: 'retry-failed', kind, error?, url? }` (контракт — таблица выше). Первый,
+автоповторяемый сбой события не даёт. В Sentry это событие отправляет ТОЛЬКО ранний inline-beacon
+`@mttzzz/nuxt-sentry`: guard ≥ 0.6.0 нужно ставить вместе с nuxt-sentry ≥ 0.11.0 — более старый nuxt-sentry
+молча отбрасывает неизвестные `reason`, и сбой остаётся без отчёта.
+
+Успешные повторы считаются по логам шлюза. Каждая попытка — запрос страницы с `sdg-retry=` в пути (в том числе
+повторы кнопкой «Обновить»: маркер остаётся в URL), поэтому число попыток и их `kind` видно прямо в логах;
+неуспешные приходят в Sentry событием `retry-failed`. Например, VictoriaLogs (LogsQL):
+
+```logsql
+kubernetes.container_name:=envoy "x-envoy-origin-path":~"sdg-retry=" | extract_regexp "sdg-retry=(?P<kind>[a-z]+)" from "x-envoy-origin-path" | stats by (":authority", kind) count() hits
+```
+
+Мост плагина — глобал `window.__sdgDeadLoad`: `fail(kind, error?, url?)` — сообщить о pre-mount сбое (идемпотентно),
+`mounted()` — приложение смонтировано, дальше скрипт ни на что не реагирует. Типы и чтение моста —
+`src/runtime/dead-load-bridge.ts`. Моста нет (dev, старый кешированный HTML) — плагин работает как раньше.
+
+Ограничения:
+
+- Inline-скрипт — как и inline-payload самого Nuxt, при строгом CSP ему нужен nonce/hash.
+- Entry считается любой `<script type="module" src>`, который не загрузился до монтирования: чужие module-скрипты на
+  странице получат тот же автоповтор.
+- Маркер ищется в `location.search`, а плагин убирает его из query роутера: в hash-режиме vue-router
+  (`#/path?query`) маркер остаётся в адресе.
+- `router.replace` после монтирования меняет `route.query`: код, следящий за ним (`watch`, `useFetch({ watch })`),
+  увидит одно изменение, а route middleware и хуки `page:start`/`page:finish` отработают для этой навигации ещё раз.
 
 ## Опции
 

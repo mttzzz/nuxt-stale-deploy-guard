@@ -32,6 +32,10 @@ import { isStaleChunkError } from './stale-chunk'
  *   - Circuit breaker (3 reload'а в окне 5 мин) предотвращает бесконечный flash;
  *     на 4-й попытке реактивный вердикт дёргает `dispatchBlocked`, чтобы слушатель
  *     (error-boundary, Sentry) узнал, что вкладка осталась без reload'а.
+ *   - Область: guard ведёт сбои ПОСЛЕ `app:mounted`. Сбои ДО монтирования (первая загрузка страницы) клиентский
+ *     плагин отдаёт inline-скрипту `dead-load.ts` через мост `dead-load-bridge.ts`: он без HEAD-проб повторяет
+ *     страницу с маркером `sdg-retry`, а на втором сбое показывает экран и шлёт `retry-failed` (см. ниже).
+ *     Нет моста (dev, старый HTML) — guard ведёт и их, как раньше.
  */
 
 export const CHUNK_RELOAD_COOLDOWN_KEY = 'chunk-reload:last-reload-at'
@@ -51,7 +55,8 @@ export const CHUNK_RELOAD_PROBE_DELAY_MS = 400
 /* Detail события `app:chunk-reload-blocked` — объединение по `reason`. Событие значит: guard проглотил
  * (или не стал обрабатывать) сбой загрузки чанка/скрипта, и перезагрузки НЕ будет. Контракт в одном месте:
  * причину `unsupported-browser` шлёт не guard, а inline-скрипт (`importmap-check.ts`) до старта приложения,
- * остальные — реактивная верификация ниже.
+ * причину `retry-failed` — другой inline-скрипт (`dead-load.ts`): сбой загрузки страницы ДО `app:mounted`
+ * повторился и после автоперезагрузки с маркером `sdg-retry`. Остальные — реактивная верификация ниже.
  *
  * `error` — исходная ошибка/значение, запустившее верификацию (payload `vite:preloadError`, `reason`
  * `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из хука
@@ -96,6 +101,20 @@ export interface UnsupportedBrowserBlockedDetail {
   missing: 'importmap'
 }
 
+/** Что не загрузилось при `retry-failed`: чанк страницы (динамический импорт) или entry (`<script type="module">`). */
+export type RetryFailedKind = 'chunk' | 'entry'
+
+/** Inline-скрипт `dead-load.ts` (head): страница не загрузилась до `app:mounted` и после автоперезагрузки
+ *  (в URL уже есть маркер `sdg-retry`) — показан экран «Страница не загрузилась». `error` — исходная
+ *  ошибка/payload, если она есть (у сбоя entry её нет: событие `error` скрипта ошибки не несёт); `url` —
+ *  адрес скрипта entry, который не загрузился. Приходит ровно один раз за загрузку страницы. */
+export interface RetryFailedBlockedDetail {
+  reason: 'retry-failed'
+  kind: RetryFailedKind
+  error?: unknown
+  url?: string
+}
+
 /** Исходы реактивной верификации — то, что `createChunkReloadGuard` шлёт через `deps.dispatchBlocked`. */
 export type ChunkReloadBlockedDetail =
   | NotStaleBlockedDetail
@@ -103,8 +122,11 @@ export type ChunkReloadBlockedDetail =
   | CooldownBlockedDetail
   | NoBuildIdBlockedDetail
 
-/** Полный detail события `app:chunk-reload-blocked` на window: исходы guard + inline-скрипт. */
-export type ChunkReloadBlockedEventDetail = ChunkReloadBlockedDetail | UnsupportedBrowserBlockedDetail
+/** Полный detail события `app:chunk-reload-blocked` на window: исходы guard + inline-скрипты. */
+export type ChunkReloadBlockedEventDetail =
+  | ChunkReloadBlockedDetail
+  | UnsupportedBrowserBlockedDetail
+  | RetryFailedBlockedDetail
 
 /* Поля исхода без `error`: ошибку добавляет реактивная обёртка, у poll-вердикта её нет. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never

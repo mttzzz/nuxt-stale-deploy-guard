@@ -1,6 +1,7 @@
 import { addPlugin, addServerPlugin, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
 
+import { DEAD_LOAD_SCRIPT, DEAD_LOAD_SCRIPT_KEY, DEAD_LOAD_SCRIPT_PRIORITY } from './runtime/dead-load'
 import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from './runtime/importmap-check'
 import type { ModuleOptions, ResolvedModuleOptions } from './runtime/types'
 
@@ -94,19 +95,28 @@ export default defineNuxtModule<ModuleOptions>({
     }
 
     /*
-     * 5) Inline-проверка import maps + экран для браузеров без них (iOS < 16.4: Nuxt 4.1+ кладёт entry в
-     *    `<script type="importmap">`, без поддержки страница падает на 500 `Module specifier '#entry'`, а
-     *    guard молча глотает ошибку — прод-инцидент ai.pushka.biz 15.10.2026). bodyClose: importmap из head
-     *    уже в DOM, скрипт исполняется при парсинге — раньше deferred module-скриптов entry. Только прод:
-     *    в dev import map нет, а экран «браузер устарел» не должен реагировать на HMR.
+     * 5) Inline-скрипты первой загрузки — только прод: в dev import map нет, а экраны не должны реагировать на HMR.
+     *    а) «Страница не загрузилась» (dead-load.ts, Sentry KP-MODMB-COM-1H): сбой чанка/entry ДО `app:mounted`
+     *       оставлял вкладку мёртвой на 500 Nuxt — `nuxt:router` (enforce: 'pre') стартует первую навигацию раньше
+     *       клиентского плагина. Скрипт — одна автоперезагрузка с маркером `sdg-retry`, после повторного сбоя экран
+     *       с кнопкой «Обновить» и событие `retry-failed`. tagPosition head + числовой tagPriority: слушатели
+     *       обязаны стоять в HTML РАНЬШЕ entry `<script type="module">`.
+     *    б) Проверка import maps + экран для браузеров без них (iOS < 16.4: Nuxt 4.1+ кладёт entry в
+     *       `<script type="importmap">`, без поддержки страница падает на 500 `Module specifier '#entry'`, а
+     *       guard молча глотает ошибку — прод-инцидент ai.pushka.biz 15.10.2026). bodyClose: importmap из head
+     *       уже в DOM, скрипт исполняется при парсинге — раньше deferred module-скриптов entry.
      */
     if (!nuxt.options.dev) {
       nuxt.options.app.head.script ??= []
-      nuxt.options.app.head.script.push({
-        key: IMPORTMAP_CHECK_SCRIPT_KEY,
-        innerHTML: IMPORTMAP_CHECK_SCRIPT,
-        tagPosition: 'bodyClose',
-      })
+      nuxt.options.app.head.script.push(
+        {
+          key: DEAD_LOAD_SCRIPT_KEY,
+          innerHTML: DEAD_LOAD_SCRIPT,
+          tagPosition: 'head',
+          tagPriority: DEAD_LOAD_SCRIPT_PRIORITY,
+        },
+        { key: IMPORTMAP_CHECK_SCRIPT_KEY, innerHTML: IMPORTMAP_CHECK_SCRIPT, tagPosition: 'bodyClose' },
+      )
     }
   },
 })

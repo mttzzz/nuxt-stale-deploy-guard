@@ -1,5 +1,6 @@
 import { defineNuxtModule, createResolver, addServerPlugin, addPlugin } from '@nuxt/kit';
 import { defu } from 'defu';
+import { DEAD_LOAD_SCRIPT_PRIORITY, DEAD_LOAD_SCRIPT, DEAD_LOAD_SCRIPT_KEY } from '../dist/runtime/dead-load.js';
 import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from '../dist/runtime/importmap-check.js';
 
 const DEFAULTS = {
@@ -71,11 +72,15 @@ const module$1 = defineNuxtModule({
     }
     if (!nuxt.options.dev) {
       nuxt.options.app.head.script ??= [];
-      nuxt.options.app.head.script.push({
-        key: IMPORTMAP_CHECK_SCRIPT_KEY,
-        innerHTML: IMPORTMAP_CHECK_SCRIPT,
-        tagPosition: "bodyClose"
-      });
+      nuxt.options.app.head.script.push(
+        {
+          key: DEAD_LOAD_SCRIPT_KEY,
+          innerHTML: DEAD_LOAD_SCRIPT,
+          tagPosition: "head",
+          tagPriority: DEAD_LOAD_SCRIPT_PRIORITY
+        },
+        { key: IMPORTMAP_CHECK_SCRIPT_KEY, innerHTML: IMPORTMAP_CHECK_SCRIPT, tagPosition: "bodyClose" }
+      );
     }
   }
 });
