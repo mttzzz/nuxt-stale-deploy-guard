@@ -1,16 +1,19 @@
 import { fileURLToPath } from 'node:url'
 
 import { loadNuxt } from '@nuxt/kit'
-import { describe, expect, it } from 'vitest'
+import type { HTMLElement } from 'happy-dom'
+import { describe, expect, it, vi } from 'vitest'
 
 import { DEAD_LOAD_SCRIPT, DEAD_LOAD_SCRIPT_KEY, DEAD_LOAD_SCRIPT_PRIORITY } from '../../src/runtime/dead-load'
 import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from '../../src/runtime/importmap-check'
+import { closePages, createPage } from './helpers/dead-load-page'
 
 /*
  * Как модуль кладёт inline-скрипты первой загрузки в `app.head.script` — на настоящем Nuxt (loadNuxt поднимает
  * конфиг и запускает setup модуля без сборки). Прод: «страница не загрузилась» в head (с числовым tagPriority —
  * слушатели обязаны стоять раньше entry) и проверка import maps в bodyClose; dev: ничего (в dev import map нет,
- * а экраны не должны реагировать на HMR).
+ * а экраны не должны реагировать на HMR). Опции проекта (палитра, тексты, таймаут watchdog'а) доезжают до
+ * скрипта — и до экрана: скрипт исполняется в том же тексте, что уходит в HTML.
  */
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/default', import.meta.url))
@@ -23,7 +26,11 @@ const DEAD_LOAD = {
 }
 const IMPORTMAP_CHECK = { key: IMPORTMAP_CHECK_SCRIPT_KEY, innerHTML: IMPORTMAP_CHECK_SCRIPT, tagPosition: 'bodyClose' }
 
-async function headScripts(options: { dev: boolean; userScripts?: { src: string }[] }) {
+async function headScripts(options: {
+  dev: boolean
+  userScripts?: { src: string }[]
+  guard?: Record<string, unknown>
+}) {
   const nuxt = await loadNuxt({
     cwd: FIXTURE,
     dev: options.dev,
@@ -31,6 +38,7 @@ async function headScripts(options: { dev: boolean; userScripts?: { src: string 
       devtools: { enabled: false },
       telemetry: false,
       app: { head: { script: options.userScripts ?? [] } },
+      staleDeployGuard: options.guard ?? {},
     },
   })
   try {
@@ -38,6 +46,17 @@ async function headScripts(options: { dev: boolean; userScripts?: { src: string 
   } finally {
     await nuxt.close()
   }
+}
+
+/* Текст inline-скрипта модуля по его ключу дедупа. */
+async function scriptText(options: { dev: boolean; guard?: Record<string, unknown>; key: string }) {
+  const scripts = await headScripts(options)
+  const found = scripts.find((item) => 'key' in item && item.key === options.key)
+  const innerHTML = found && 'innerHTML' in found ? found.innerHTML : undefined
+  if (typeof innerHTML !== 'string') {
+    throw new TypeError(`скрипт ${options.key} не найден`)
+  }
+  return innerHTML
 }
 
 describe('модуль — inline-скрипты первой загрузки в app.head.script', { timeout: 60_000 }, () => {
@@ -52,5 +71,46 @@ describe('модуль — inline-скрипты первой загрузки �
   it('прод: скрипты приложения сохраняются, скрипты модуля добавляются после них', async () => {
     const scripts = await headScripts({ dev: false, userScripts: [{ src: '/analytics.js' }] })
     expect(scripts).toEqual([{ src: '/analytics.js' }, DEAD_LOAD, IMPORTMAP_CHECK])
+  })
+})
+
+describe('модуль — опции проекта в inline-скриптах', { timeout: 60_000 }, () => {
+  it('палитра и тексты проекта доезжают до экрана «страница не загрузилась»', async () => {
+    const script = await scriptText({
+      dev: false,
+      key: DEAD_LOAD_SCRIPT_KEY,
+      guard: {
+        theme: { dark: { bg: '#0b1220', accent: '#24a4ff' } },
+        texts: { failedTitle: 'Не открылось' },
+      },
+    })
+
+    const page = createPage({ url: 'https://app.example.com/a?sdg-retry=chunk', script })
+    page.run()
+    page.preloadError(new Error('boom'))
+
+    const root = page.document.querySelector<HTMLElement>('[data-sdg-dead-load]')
+    const probe = page.document.createElement('div')
+    probe.style.backgroundColor = '#0b1220'
+    expect(root?.style.backgroundColor).toBe(probe.style.backgroundColor)
+    expect(root?.querySelector('h1')?.textContent).toBe('Не открылось')
+    await closePages()
+  })
+
+  it("таймаут watchdog'а из опций модуля доезжает до скрипта", async () => {
+    const script = await scriptText({ dev: false, key: DEAD_LOAD_SCRIPT_KEY, guard: { loadTimeoutMs: 1234 } })
+
+    vi.useFakeTimers()
+    try {
+      const page = createPage({ script })
+      page.run()
+      vi.advanceTimersByTime(1233)
+      expect(page.timeouts).toEqual([])
+      vi.advanceTimersByTime(1)
+      expect(page.timeouts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+      await closePages()
+    }
   })
 })

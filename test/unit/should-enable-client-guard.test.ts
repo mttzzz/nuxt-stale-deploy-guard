@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { shouldEnableClientGuard } from '../../src/module'
+import { DEFAULT_SCREEN_TEXTS, DEFAULT_SCREEN_THEME } from '../../src/runtime/screen-config'
 import type { ResolvedModuleOptions } from '../../src/runtime/types'
 
 /*
@@ -19,6 +20,9 @@ const BASE: ResolvedModuleOptions = {
   cooldownMs: 10_000,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 60_000 },
   skipInDev: true,
+  theme: DEFAULT_SCREEN_THEME,
+  texts: DEFAULT_SCREEN_TEXTS,
+  loadTimeoutMs: 45_000,
 }
 
 describe('shouldEnableClientGuard', () => {

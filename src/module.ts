@@ -1,8 +1,14 @@
 import { addPlugin, addServerPlugin, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
 
-import { DEAD_LOAD_SCRIPT, DEAD_LOAD_SCRIPT_KEY, DEAD_LOAD_SCRIPT_PRIORITY } from './runtime/dead-load'
-import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from './runtime/importmap-check'
+import {
+  buildDeadLoadScript,
+  DEAD_LOAD_SCRIPT_KEY,
+  DEAD_LOAD_SCRIPT_PRIORITY,
+  DEFAULT_LOAD_TIMEOUT_MS,
+} from './runtime/dead-load'
+import { buildImportmapCheckScript, IMPORTMAP_CHECK_SCRIPT_KEY } from './runtime/importmap-check'
+import { resolveScreenTexts, resolveScreenTheme } from './runtime/screen-config'
 import type { ModuleOptions, ResolvedModuleOptions } from './runtime/types'
 
 export type { ModuleOptions } from './runtime/types'
@@ -17,6 +23,9 @@ const DEFAULTS: ResolvedModuleOptions = {
   cooldownMs: 10_000,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 60_000 },
   skipInDev: true,
+  theme: resolveScreenTheme(),
+  texts: resolveScreenTexts(),
+  loadTimeoutMs: DEFAULT_LOAD_TIMEOUT_MS,
 }
 
 /* Чистая функция для решения «подключать ли client guard» — extract для unit-теста.
@@ -53,6 +62,9 @@ export default defineNuxtModule<ModuleOptions>({
       cooldownMs: opts.cooldownMs ?? DEFAULTS.cooldownMs,
       circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker),
       skipInDev: opts.skipInDev ?? DEFAULTS.skipInDev,
+      theme: resolveScreenTheme(opts.theme),
+      texts: resolveScreenTexts(opts.texts),
+      loadTimeoutMs: opts.loadTimeoutMs ?? DEFAULTS.loadTimeoutMs,
     }
 
     /*
@@ -105,17 +117,25 @@ export default defineNuxtModule<ModuleOptions>({
      *       `<script type="importmap">`, без поддержки страница падает на 500 `Module specifier '#entry'`, а
      *       guard молча глотает ошибку — прод-инцидент ai.pushka.biz 15.10.2026). bodyClose: importmap из head
      *       уже в DOM, скрипт исполняется при парсинге — раньше deferred module-скриптов entry.
+     *
+     *    Палитра и тексты экранов — опции модуля (`theme`, `texts`): они запекаются в текст скриптов на
+     *    этапе сборки (скрипт исполняется до старта приложения и runtimeConfig не читает).
      */
     if (!nuxt.options.dev) {
+      const screenConfig = { theme: resolved.theme, texts: resolved.texts }
       nuxt.options.app.head.script ??= []
       nuxt.options.app.head.script.push(
         {
           key: DEAD_LOAD_SCRIPT_KEY,
-          innerHTML: DEAD_LOAD_SCRIPT,
+          innerHTML: buildDeadLoadScript({ ...screenConfig, loadTimeoutMs: resolved.loadTimeoutMs }),
           tagPosition: 'head',
           tagPriority: DEAD_LOAD_SCRIPT_PRIORITY,
         },
-        { key: IMPORTMAP_CHECK_SCRIPT_KEY, innerHTML: IMPORTMAP_CHECK_SCRIPT, tagPosition: 'bodyClose' },
+        {
+          key: IMPORTMAP_CHECK_SCRIPT_KEY,
+          innerHTML: buildImportmapCheckScript(screenConfig),
+          tagPosition: 'bodyClose',
+        },
       )
     }
   },

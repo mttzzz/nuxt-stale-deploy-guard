@@ -1,11 +1,21 @@
 // @vitest-environment happy-dom
-import { runInThisContext } from 'node:vm'
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DEAD_LOAD_SCRIPT } from '../../src/runtime/dead-load'
 import { DEAD_LOAD_GLOBAL } from '../../src/runtime/dead-load-bridge'
-import plugin from '../../src/runtime/plugin.client'
+import {
+  chunkError,
+  createBridge,
+  install,
+  preloadError,
+  resolveError,
+  runScript,
+  setupPluginDeadLoad,
+  stubServerBuildId,
+  teardownPluginDeadLoad,
+  unhandledRejection,
+  windowError,
+  type Installed,
+} from './helpers/plugin-dead-load'
 import { nuxtStub } from './stubs/nuxt-app'
 
 /*
@@ -14,106 +24,17 @@ import { nuxtStub } from './stubs/nuxt-app'
  * мосту `mounted()` и убирает из URL только ключ `sdg-retry`; после монтирования каналы работают как всегда
  * (пробы, verify-before-reload, событие `app:chunk-reload-blocked`). Нет моста — всё как раньше.
  * Плагин ставится заново в каждом тесте, а его слушатели window снимаются в afterEach: `mounted` живёт в замыкании.
+ * Оснастка (установка плагина, шпионы, запуск настоящего текста скрипта) — helpers/plugin-dead-load.ts;
+ * документ, уже переживший сбой, — plugin-client-dead-load-handled.test.ts.
  */
 
-type HookHandler = (...args: unknown[]) => unknown
-
-interface Installed {
-  callHook: (name: string, ...args: unknown[]) => unknown
-  /* Detail каждого события `app:chunk-reload-blocked`, по порядку. */
-  blocked: unknown[]
-}
-
-interface FakeNuxtApp {
-  hook: (name: string, handler: HookHandler) => void
-}
-
-const chunkError = new TypeError('Failed to fetch dynamically imported module: /_nuxt/invite.js')
-const resolveError = new Error('Couldn\'t resolve component "default" at "/invite"')
-
-const added: Parameters<typeof globalThis.addEventListener>[] = []
-
 beforeEach(() => {
-  nuxtStub.config.app.buildId = 'build-a'
-  nuxtStub.router.currentRoute.value = { path: '/invite/abc', query: {}, hash: '' }
-  nuxtStub.router.replace.mockClear()
-  nuxtStub.reload.mockClear()
-  sessionStorage.clear()
-  const original = globalThis.addEventListener.bind(globalThis)
-  vi.spyOn(globalThis, 'addEventListener').mockImplementation((...args: Parameters<typeof original>) => {
-    added.push(args)
-    original(...args)
-  })
+  setupPluginDeadLoad()
 })
 
 afterEach(() => {
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  for (const [type, listener, options] of added.splice(0)) {
-    globalThis.removeEventListener(type, listener, options)
-  }
-  Reflect.deleteProperty(globalThis, DEAD_LOAD_GLOBAL)
+  teardownPluginDeadLoad()
 })
-
-function createBridge() {
-  const bridge = { fail: vi.fn<(kind: string, error?: unknown, url?: string) => void>(), mounted: vi.fn<() => void>() }
-  Reflect.set(globalThis, DEAD_LOAD_GLOBAL, bridge)
-  return bridge
-}
-
-function install(): Installed {
-  const hooks = new Map<string, HookHandler>()
-  const blocked: unknown[] = []
-  globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
-    blocked.push('detail' in event ? event.detail : undefined)
-  })
-  /* Заглушка defineNuxtPlugin отдаёт сам setup-колбэк: плагин вызываем как обычную функцию. */
-  const setup = plugin as unknown as (nuxtApp: FakeNuxtApp) => void
-  setup({
-    hook(name, handler) {
-      hooks.set(name, handler)
-    },
-  })
-  return {
-    blocked,
-    callHook(name, ...args) {
-      const handler = hooks.get(name)
-      if (!handler) {
-        throw new Error(`плагин не зарегистрировал хук ${name}`)
-      }
-      return handler(...args)
-    },
-  }
-}
-
-/* Сервер отвечает на HEAD-пробу build-id'ом `serverBuildId`: реальный `fetch` в тесте недопустим. */
-function stubServerBuildId(serverBuildId: string) {
-  const probe = vi.fn((_url: string, _init?: unknown) =>
-    Promise.resolve({ headers: { get: (name: string) => (name === 'x-app-build-id' ? serverBuildId : null) } }),
-  )
-  vi.stubGlobal('fetch', probe)
-  return probe
-}
-
-function preloadError(payload: unknown) {
-  const event = new Event('vite:preloadError', { cancelable: true })
-  Object.assign(event, { payload })
-  globalThis.dispatchEvent(event)
-  return event
-}
-
-function unhandledRejection(reason: unknown) {
-  const event = new Event('unhandledrejection', { cancelable: true })
-  Object.assign(event, { reason })
-  globalThis.dispatchEvent(event)
-  return event
-}
-
-function windowError(error: unknown, message: string) {
-  const event = new ErrorEvent('error', { error, message, cancelable: true })
-  globalThis.dispatchEvent(event)
-  return event
-}
 
 describe('до app:mounted с мостом: каждый канал сдаёт исходную ошибку мосту, без проб и без событий guard', () => {
   it('vite:preloadError → fail("chunk", payload); событие гасится, как и раньше', () => {
@@ -341,21 +262,7 @@ describe('моста нет (dev, старый HTML) — всё как рань�
   })
 })
 
-/* Исполняем итоговый текст скрипта в окне теста — как браузер при парсинге head; location.replace — шпион. */
-function runScript(url: string) {
-  globalThis.history.replaceState({}, '', url)
-  const replace = vi.fn<(target: string) => void>()
-  Object.defineProperty(globalThis.location, 'replace', { value: replace, configurable: true })
-  runInThisContext(DEAD_LOAD_SCRIPT)
-  return replace
-}
-
 describe('плагин + настоящий скрипт dead-load: рукопожатие через window.__sdgDeadLoad', () => {
-  afterEach(() => {
-    document.querySelector('[data-sdg-dead-load]')?.remove()
-    Reflect.deleteProperty(globalThis.location, 'replace')
-  })
-
   it('сбой чанка из хука плагина до монтирования → повтор страницы с sdg-retry=chunk', () => {
     const replace = runScript('/invite/abc?x=1#top')
     const { callHook, blocked } = install()

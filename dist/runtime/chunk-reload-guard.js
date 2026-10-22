@@ -6,6 +6,7 @@ export const CHUNK_RELOAD_CIRCUIT_WINDOW_MS = 5 * 60 * 1e3;
 export const CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS = 3;
 export const CHUNK_RELOAD_PROBES = 4;
 export const CHUNK_RELOAD_PROBE_DELAY_MS = 400;
+export const LOAD_TIMEOUT_EVENT = "app:load-timeout";
 function defaultSleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);

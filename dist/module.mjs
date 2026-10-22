@@ -1,7 +1,8 @@
 import { defineNuxtModule, createResolver, addServerPlugin, addPlugin } from '@nuxt/kit';
 import { defu } from 'defu';
-import { DEAD_LOAD_SCRIPT_PRIORITY, DEAD_LOAD_SCRIPT, DEAD_LOAD_SCRIPT_KEY } from '../dist/runtime/dead-load.js';
-import { IMPORTMAP_CHECK_SCRIPT, IMPORTMAP_CHECK_SCRIPT_KEY } from '../dist/runtime/importmap-check.js';
+import { DEFAULT_LOAD_TIMEOUT_MS, DEAD_LOAD_SCRIPT_PRIORITY, DEAD_LOAD_SCRIPT_KEY, buildDeadLoadScript } from '../dist/runtime/dead-load.js';
+import { IMPORTMAP_CHECK_SCRIPT_KEY, buildImportmapCheckScript } from '../dist/runtime/importmap-check.js';
+import { resolveScreenTexts, resolveScreenTheme } from '../dist/runtime/screen-config.js';
 
 const DEFAULTS = {
   buildIdHeader: "x-app-build-id",
@@ -12,7 +13,10 @@ const DEFAULTS = {
   pollIntervalMs: 0,
   cooldownMs: 1e4,
   circuitBreaker: { maxAttempts: 3, windowMs: 5 * 6e4 },
-  skipInDev: true
+  skipInDev: true,
+  theme: resolveScreenTheme(),
+  texts: resolveScreenTexts(),
+  loadTimeoutMs: DEFAULT_LOAD_TIMEOUT_MS
 };
 function shouldEnableClientGuard(opts, isDev) {
   if (opts.skipInDev && isDev) {
@@ -43,7 +47,10 @@ const module$1 = defineNuxtModule({
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       cooldownMs: opts.cooldownMs ?? DEFAULTS.cooldownMs,
       circuitBreaker: defu(opts.circuitBreaker, DEFAULTS.circuitBreaker),
-      skipInDev: opts.skipInDev ?? DEFAULTS.skipInDev
+      skipInDev: opts.skipInDev ?? DEFAULTS.skipInDev,
+      theme: resolveScreenTheme(opts.theme),
+      texts: resolveScreenTexts(opts.texts),
+      loadTimeoutMs: opts.loadTimeoutMs ?? DEFAULTS.loadTimeoutMs
     };
     const ourRules = {};
     for (const p of resolved.htmlPaths) {
@@ -71,15 +78,20 @@ const module$1 = defineNuxtModule({
       addPlugin({ src: resolver.resolve("./runtime/plugin.client"), mode: "client" });
     }
     if (!nuxt.options.dev) {
+      const screenConfig = { theme: resolved.theme, texts: resolved.texts };
       nuxt.options.app.head.script ??= [];
       nuxt.options.app.head.script.push(
         {
           key: DEAD_LOAD_SCRIPT_KEY,
-          innerHTML: DEAD_LOAD_SCRIPT,
+          innerHTML: buildDeadLoadScript({ ...screenConfig, loadTimeoutMs: resolved.loadTimeoutMs }),
           tagPosition: "head",
           tagPriority: DEAD_LOAD_SCRIPT_PRIORITY
         },
-        { key: IMPORTMAP_CHECK_SCRIPT_KEY, innerHTML: IMPORTMAP_CHECK_SCRIPT, tagPosition: "bodyClose" }
+        {
+          key: IMPORTMAP_CHECK_SCRIPT_KEY,
+          innerHTML: buildImportmapCheckScript(screenConfig),
+          tagPosition: "bodyClose"
+        }
       );
     }
   }

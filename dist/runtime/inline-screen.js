@@ -1,4 +1,6 @@
-export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
+import { toInlineScriptLiteral } from "./screen-config.js";
+const INLINE_SCREEN_HELPERS_TEMPLATE = String.raw`  var CFG = __SDG_CONFIG__;
+  var doc = document;
   var win = window;
 
   function sdgShared() {
@@ -29,14 +31,15 @@ export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
     if (!light && !/(^|\s)dark(\s|$)/.test(root.className) && win.matchMedia) {
       light = win.matchMedia('(prefers-color-scheme: light)').matches;
     }
+    var palette = light ? CFG.theme.light : CFG.theme.dark;
     return {
-      bg: light ? '#ffffff' : '#1d161e',
-      fg: light ? '#1d161e' : '#f3eef5',
-      muted: light ? '#645369' : '#b9aabf',
-      accent: light ? '#9333ea' : '#c084fc',
-      onAccent: light ? '#ffffff' : '#1d161e',
-      line: light ? '#d9cfe0' : '#4a3b50',
-      fieldBg: light ? '#f6f2f8' : '#271d29'
+      bg: palette.bg,
+      fg: palette.fg,
+      muted: palette.muted,
+      accent: palette.accent,
+      onAccent: palette.onAccent,
+      line: palette.line,
+      fieldBg: palette.fieldBg
     };
   }
 
@@ -88,3 +91,6 @@ export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
     (doc.body || doc.documentElement).appendChild(overlay);
   }
 `;
+export function buildInlineScreenHelpers(config) {
+  return INLINE_SCREEN_HELPERS_TEMPLATE.replace("__SDG_CONFIG__", () => toInlineScriptLiteral(config));
+}

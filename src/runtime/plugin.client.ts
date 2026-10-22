@@ -1,7 +1,7 @@
 import { defineNuxtPlugin, reloadNuxtApp, useRouter, useRuntimeConfig } from '#app'
 
 import { createChunkReloadGuard } from './chunk-reload-guard'
-import { readDeadLoadBridge, RETRY_MARKER_KEY } from './dead-load-bridge'
+import { isDeadLoadHandled, readDeadLoadBridge, RETRY_MARKER_KEY } from './dead-load-bridge'
 import { createSafeSessionStorage } from './safe-storage'
 import { isStaleChunkError } from './stale-chunk'
 
@@ -30,6 +30,13 @@ import { isStaleChunkError } from './stale-chunk'
  * первого чанка оставлял вкладку мёртвой на странице ошибки Nuxt. На `app:mounted` плагин сообщает мосту
  * `mounted()` и убирает из URL ключ `sdg-retry` (`router.replace`, прочие query и hash на месте); с этого
  * момента каналы работают как всегда — через guard. Нет моста (dev, старый HTML) — плагин как раньше.
+ *
+ * Документ, который УЖЕ пережил сбой (мост сообщил `handled()` — сделан автоповтор или показан экран
+ * «Страница не загрузилась»), для плагина мёртв: все каналы молчат до конца жизни документа, `app:mounted`
+ * не убирает маркер `sdg-retry` (кнопка «Обновить» на экране = одна попытка на нажатие), poll не вердиктит.
+ * Зачем: уходящий документ ещё живёт секунды после автоповтора, и навигация обрывает загрузку CSS его
+ * страницы ошибки — сбой доходит до guard уже ПОСЛЕ монтирования, прыгает «билд актуален» и шлёт ложный
+ * `not-stale` (Sentry KP-MODMB-COM-1H, 21.10.2026).
  *
  * Build-id берём из `runtimeConfig.app.buildId` (Nuxt автогенерит).
  * Server build-id фетчим HEAD-запросом по текущему URL и читаем header
@@ -109,6 +116,13 @@ export default defineNuxtPlugin((nuxtApp) => {
     return true
   }
 
+  /* Документ уже пережил сбой (автоповтор сделан или показан экран «Страница не загрузилась»): с этого момента
+     плагин молчит — иначе уходящий документ (навигация обрывает загрузку CSS его страницы ошибки) шлёт ложный
+     «билд актуален»: Sentry KP-MODMB-COM-1H, 21.10.2026. Мост 0.6.0 без `handled` → false, поведение прежнее. */
+  function deadLoadHandled(): boolean {
+    return isDeadLoadHandled(deadLoad)
+  }
+
   /* Страница загрузилась — маркер автоповтора в адресе больше не нужен. Убирается ТОЛЬКО ключ `sdg-retry`:
      прочие query и hash остаются. */
   async function dropRetryMarker(): Promise<void> {
@@ -125,6 +139,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   }
 
   nuxtApp.hook('app:chunkError', ({ error }) => {
+    if (deadLoadHandled()) {
+      return
+    }
     if (handOverBeforeMount(error)) {
       return
     }
@@ -132,6 +149,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('vue:error', (error) => {
+    if (deadLoadHandled()) {
+      return
+    }
     if (isStaleChunkError(error) && handOverBeforeMount(error)) {
       return
     }
@@ -139,6 +159,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Nuxt hook API requires callback, not awaitable
   nuxtApp.hook('app:error', (error) => {
+    if (deadLoadHandled()) {
+      return
+    }
     if (isStaleChunkError(error) && handOverBeforeMount(error)) {
       return
     }
@@ -146,16 +169,26 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
   nuxtApp.hook('app:mounted', () => {
     mounted = true
-    if (deadLoad) {
-      deadLoad.mounted()
-      void dropRetryMarker()
+    if (!deadLoad) {
+      return
     }
+    /* Документ уже пережил сбой: экран «Страница не загрузилась» стоит, а маркер `sdg-retry` в адресе нужен —
+       кнопка «Обновить» перезагружает страницу С маркером, одно нажатие = одна попытка. Убирать маркер и
+       сообщать скрипту `mounted()` здесь нельзя. */
+    if (deadLoadHandled()) {
+      return
+    }
+    deadLoad.mounted()
+    void dropRetryMarker()
   })
 
   globalThis.addEventListener('vite:preloadError', (event) => {
     event.preventDefault()
     /* Vite кладёт ошибку в `event.payload` (не `detail`). */
     const error: unknown = 'payload' in event ? event.payload : undefined
+    if (deadLoadHandled()) {
+      return
+    }
     if (handOverBeforeMount(error)) {
       return
     }
@@ -167,6 +200,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
+    if (deadLoadHandled()) {
+      return
+    }
     if (handOverBeforeMount(reason)) {
       return
     }
@@ -179,6 +215,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     event.preventDefault()
+    if (deadLoadHandled()) {
+      return
+    }
     if (handOverBeforeMount(candidate)) {
       return
     }
@@ -191,6 +230,11 @@ export default defineNuxtPlugin((nuxtApp) => {
   if (opts.pollIntervalMs > 0) {
     nuxtApp.hook('app:mounted', () => {
       globalThis.setInterval(() => {
+        /* Документ, уже переживший сбой, poll не вердиктит: перезагрузка стёрла бы экран «Страница не
+           загрузилась» и сломала контракт «одно нажатие = одна попытка». */
+        if (deadLoadHandled()) {
+          return
+        }
         void guard.verifyConvergedAndReload(getCurrentLocationPath())
       }, opts.pollIntervalMs)
     })

@@ -25,6 +25,7 @@ afterEach(closePages)
 interface Bridge {
   fail: (kind: string, error?: unknown, url?: string) => void
   mounted: () => void
+  handled: () => boolean
 }
 
 function bridgeOf(page: Page): Bridge {
@@ -87,6 +88,50 @@ describe('мост fail() и mounted() для клиентского плаги�
     bridgeOf(page).mounted()
     expect(requireScreen(page).dataset.sdgState).toBe('failed')
     expect(page.details).toHaveLength(1)
+  })
+})
+
+/* Мост `handled()` — «документ уже пережил сбой». Клиентский плагин по нему молчит до конца жизни документа:
+   уходящая страница (навигация обрывает загрузку CSS её страницы ошибки) не должна слать ложный «билд актуален»
+   (Sentry KP-MODMB-COM-1H, 21.10.2026). */
+describe('мост handled(): документ, уже переживший сбой', () => {
+  it('до сбоя — false', () => {
+    const page = createPage()
+    page.run()
+    expect(bridgeOf(page).handled()).toBe(false)
+  })
+
+  it('автоповтор (сбой на URL без маркера) → true', () => {
+    const page = createPage()
+    page.run()
+    page.preloadError(new Error('boom'))
+    expect(page.replace).toHaveBeenCalledOnce()
+    expect(bridgeOf(page).handled()).toBe(true)
+  })
+
+  it('экран «Страница не загрузилась» (сбой на URL с маркером) → true', () => {
+    const page = createPage({ url: 'https://app.example.com/a?sdg-retry=chunk' })
+    page.run()
+    page.preloadError(new Error('boom'))
+    expect(requireScreen(page).dataset.sdgState).toBe('failed')
+    expect(bridgeOf(page).handled()).toBe(true)
+  })
+
+  it('не сбрасывается после mounted(): истина остаётся', () => {
+    const page = createPage()
+    page.run()
+    page.preloadError(new Error('boom'))
+    bridgeOf(page).mounted()
+    expect(bridgeOf(page).handled()).toBe(true)
+  })
+
+  it('сбой ПОСЛЕ mounted() скрипт не обрабатывает — документ не «пережил сбой» (handled остаётся false)', () => {
+    const page = createPage()
+    page.run()
+    bridgeOf(page).mounted()
+    page.preloadError(new Error('boom'))
+    expectNothingHappened(page)
+    expect(bridgeOf(page).handled()).toBe(false)
   })
 })
 

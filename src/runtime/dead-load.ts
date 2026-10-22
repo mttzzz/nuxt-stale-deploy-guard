@@ -1,4 +1,5 @@
-import { INLINE_SCREEN_HELPERS } from './inline-screen'
+import { buildInlineScreenHelpers, type InlineScreenConfig } from './inline-screen'
+import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
 
 /*
  * Inline-скрипт «мёртвая первая загрузка»: сбой чанка/entry ДО `app:mounted` (Sentry KP-MODMB-COM-1H). Модуль
@@ -42,20 +43,35 @@ import { INLINE_SCREEN_HELPERS } from './inline-screen'
  *   6. Если сработал экран «браузер без import maps» (importmap-check.ts, `window.stop()`), скрипт не делает
  *      ничего: общее состояние `__sdgDeadLoad.takenOver` выставлено ДО остановки, а `error` оборванных ею
  *      скриптов entry не должны ни перезагружать страницу, ни рисовать второй экран.
+ *   7. Watchdog «приложение не загрузилось»: таймер на `loadTimeoutMs` (дефолт 45 с) стартует в момент
+ *      исполнения скрипта (он в head, значит раньше entry). Если к сроку приложение НЕ смонтировалось и
+ *      пользователю НЕ показан экран «страница не загрузилась» — событие `app:load-timeout`
+ *      (`{ reason: 'load-timeout', timeoutMs, elapsedMs, url, kind? }`, контракт — chunk-reload-guard.ts).
+ *      Ровно один раз за документ. Смысл: поймать «мёртвую первую загрузку» без ошибки в консоли (зависший
+ *      entry, минувший CDN, редирект на пустую страницу) — там, где ни один обработчик сбоя не сработал и
+ *      в Sentry тишина. Автоповтор watchdog НЕ гасит: страница должна была уйти на перезагрузку; если не
+ *      ушла — это ровно тот случай, о котором нужен отчёт (в detail попадает `kind` увиденного сбоя).
+ *      Экран «браузер без import maps» watchdog тоже гасит (`takenOver`): там отчёт уже есть.
  *
  * Мост для клиентского плагина — глобал `window.__sdgDeadLoad` (общее состояние из inline-screen.ts):
  *   - `fail(kind, error?, url?)` — сообщить о pre-mount сбое (`kind`: `'chunk'` | `'entry'`; иное значение
  *     считается `'chunk'`); идемпотентно;
  *   - `mounted()` — приложение смонтировалось: дальше скрипт ни на что не реагирует (уже показанный экран
- *     не убирается: смонтированное приложение могло показать страницу ошибки Nuxt, и он честнее).
+ *     не убирается: смонтированное приложение могло показать страницу ошибки Nuxt, и он честнее) и
+ *     останавливается watchdog;
+ *   - `handled()` — «этот документ уже пережил сбой»: true с первого обработанного `fail` (и ветка автоповтора,
+ *     и ветка экрана «не загрузилась»), дальше только true. Нужен клиентскому плагину: после автоповтора или
+ *     экрана документ уходит (навигация обрывает загрузку CSS его страницы ошибки) — и любой его сбой после
+ *     этого не должен превращаться в ложный «билд актуален» (Sentry KP-MODMB-COM-1H, 21.10.2026).
  * Типы и чтение моста — `dead-load-bridge.ts` (плагин не импортирует этот модуль, чтобы текст скрипта не попал
  * в клиентский бандл). Нет глобала (dev, старый кешированный HTML) — плагин работает как раньше.
  *
- * Оформление и хелперы — inline-screen.ts (палитра ai.pushka.biz, тёмная по умолчанию, светлая при `html.light`
- * или `prefers-color-scheme: light`; ES5; CSP: как и сам payload Nuxt, inline-скрипту при строгом CSP нужен
- * nonce/hash). Корень оверлея несёт `data-sdg-dead-load` (пустое значение) и `data-sdg-state`; тексты не
- * настраиваются. Если `<body>` ещё нет (сбой пришёл, пока парсится head), оверлей кладётся в `<html>`.
- * В тексте скрипта нельзя бэктики, `${`, `</script`, `<!--` и комментарии — они выше.
+ * Оформление и хелперы — inline-screen.ts (палитра и тексты проекта: опции модуля `theme`/`texts`, дефолты —
+ * палитра ai.pushka.biz и её русские тексты; тёмная по умолчанию, светлая при `html.light` или
+ * `prefers-color-scheme: light`; ES5; CSP: как и сам payload Nuxt, inline-скрипту при строгом CSP нужен
+ * nonce/hash). Корень оверлея несёт `data-sdg-dead-load` (пустое значение) и `data-sdg-state`. Если `<body>`
+ * ещё нет (сбой пришёл, пока парсится head), оверлей кладётся в `<html>`. В тексте скрипта нельзя бэктики,
+ * `${`, `</script`, `<!--` и комментарии — они выше.
  */
 
 /* Ключ дедупа unhead: повторная регистрация (второй вызов setup, layers) не задвоит скрипт. */
@@ -66,13 +82,35 @@ export const DEAD_LOAD_SCRIPT_KEY = 'stale-deploy-guard-dead-load'
    после import map Nuxt (-2) и позже `<meta charset>` (-20), viewport (-15), CSP (-30) и base (-10). */
 export const DEAD_LOAD_SCRIPT_PRIORITY = -1
 
-export const DEAD_LOAD_SCRIPT = String.raw`(function () {
-${INLINE_SCREEN_HELPERS}
+/* Таймаут watchdog'а «приложение не загрузилось» по умолчанию (45 с). */
+export const DEFAULT_LOAD_TIMEOUT_MS = 45_000
+
+/* Конфиг экрана по умолчанию — палитра ai.pushka.biz, её тексты и дефолтный таймаут watchdog'а. */
+const DEFAULT_CONFIG: InlineScreenConfig = {
+  theme: DEFAULT_SCREEN_THEME,
+  texts: DEFAULT_SCREEN_TEXTS,
+  loadTimeoutMs: DEFAULT_LOAD_TIMEOUT_MS,
+}
+
+/** Текст inline-скрипта «мёртвая первая загрузка» с палитрой, текстами и таймаутом watchdog'а проекта. */
+export function buildDeadLoadScript(config: InlineScreenConfig = DEFAULT_CONFIG): string {
+  return String.raw`(function () {
+${buildInlineScreenHelpers(config)}
   var MARKER = 'sdg-retry';
+  var TIMEOUT_MS = CFG.loadTimeoutMs;
   var shared = sdgShared();
   var handled = false;
   var mounted = false;
+  var failureScreenShown = false;
+  var lastKind = null;
   var current = null;
+  var startedAt = Date.now();
+  var watchdogTimer = null;
+  var reported = false;
+
+  if (TIMEOUT_MS > 0) {
+    watchdogTimer = win.setTimeout(onTimeout, TIMEOUT_MS);
+  }
 
   function hasMarker() {
     return new RegExp('[?&]' + MARKER + '(=|&|$)').test(win.location.search);
@@ -87,6 +125,33 @@ ${INLINE_SCREEN_HELPERS}
     return base + glue + MARKER + '=' + kind + hash;
   }
 
+  function stopWatchdog() {
+    if (watchdogTimer !== null) {
+      try {
+        win.clearTimeout(watchdogTimer);
+      } catch (e) {}
+      watchdogTimer = null;
+    }
+  }
+
+  function onTimeout() {
+    watchdogTimer = null;
+    if (reported || mounted || failureScreenShown || shared.takenOver) {
+      return;
+    }
+    reported = true;
+    var detail = {
+      reason: 'load-timeout',
+      timeoutMs: TIMEOUT_MS,
+      elapsedMs: Date.now() - startedAt,
+      url: win.location.href
+    };
+    if (lastKind) {
+      detail.kind = lastKind;
+    }
+    sdgEmit('app:load-timeout', detail);
+  }
+
   function present(state) {
     if (current && current.parentNode) {
       current.parentNode.removeChild(current);
@@ -99,14 +164,14 @@ ${INLINE_SCREEN_HELPERS}
     var button = null;
     if (state === 'loading') {
       overlay.setAttribute('role', 'status');
-      sdgAdd(card, 'p', 'margin:0;font-size:18px;line-height:1.4;font-weight:600;text-align:center', 'Загружаем страницу…');
+      sdgAdd(card, 'p', 'margin:0;font-size:18px;line-height:1.4;font-weight:600;text-align:center', CFG.texts.loading);
     } else {
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-modal', 'true');
       overlay.setAttribute('aria-labelledby', 'sdg-dead-load-title');
-      sdgTitle(card, theme, 'Страница не загрузилась').id = 'sdg-dead-load-title';
-      sdgText(card, 'Проверьте подключение к интернету и нажмите «Обновить».');
-      button = sdgButton(card, theme, 'Обновить');
+      sdgTitle(card, theme, CFG.texts.failedTitle).id = 'sdg-dead-load-title';
+      sdgText(card, CFG.texts.failedAdvice);
+      button = sdgButton(card, theme, CFG.texts.reload);
       button.onclick = function () {
         win.location.reload();
       };
@@ -126,6 +191,7 @@ ${INLINE_SCREEN_HELPERS}
     }
     handled = true;
     var type = kind === 'entry' ? 'entry' : 'chunk';
+    lastKind = type;
     if (!hasMarker()) {
       try {
         present('loading');
@@ -135,6 +201,7 @@ ${INLINE_SCREEN_HELPERS}
         return;
       } catch (e) {}
     }
+    failureScreenShown = true;
     try {
       present('failed');
     } catch (e) {}
@@ -169,7 +236,14 @@ ${INLINE_SCREEN_HELPERS}
   );
 
   shared.fail = fail;
+  shared.handled = function () {
+    return handled;
+  };
   shared.mounted = function () {
     mounted = true;
+    stopWatchdog();
   };
 })();`
+}
+
+export const DEAD_LOAD_SCRIPT = buildDeadLoadScript()

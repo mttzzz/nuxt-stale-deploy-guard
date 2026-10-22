@@ -128,6 +128,28 @@ export type ChunkReloadBlockedEventDetail =
   | UnsupportedBrowserBlockedDetail
   | RetryFailedBlockedDetail
 
+/** Имя события watchdog'а «приложение не загрузилось». */
+export const LOAD_TIMEOUT_EVENT = 'app:load-timeout'
+
+/** Detail события `app:load-timeout` — приложение не смонтировалось за отведённое время.
+ *
+ *  Шлёт inline-скрипт `dead-load.ts` (head) — единственное место, где видно «приложение вообще не
+ *  стартовало»: ни один обработчик сбоя не сработал, ошибок в консоли нет, а вкладка просто мёртвая.
+ *  Отчёт уходит ОДИН раз за документ и только если приложение не смонтировалось и пользователю не был
+ *  показан экран «страница не загрузилась» (для него есть своё событие `retry-failed`).
+ *
+ *  `timeoutMs` — сколько ждали (опция модуля `loadTimeoutMs`, дефолт 45_000); `elapsedMs` — сколько
+ *  прошло на самом деле (таймеры в фоне вкладки могут сработать позже); `url` — адрес страницы;
+ *  `kind` — что не загрузилось, если скрипт к тому времени уже видел сбой (`chunk` | `entry`), иначе
+ *  поля нет: сбоя не было, приложение просто не стартовало. */
+export interface LoadTimeoutDetail {
+  reason: 'load-timeout'
+  timeoutMs: number
+  elapsedMs: number
+  url: string
+  kind?: RetryFailedKind
+}
+
 /* Поля исхода без `error`: ошибку добавляет реактивная обёртка, у poll-вердикта её нет. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type ReportBlocked = (fields: DistributiveOmit<ChunkReloadBlockedDetail, 'error'>) => void

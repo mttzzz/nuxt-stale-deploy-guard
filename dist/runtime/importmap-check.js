@@ -1,7 +1,13 @@
-import { INLINE_SCREEN_HELPERS } from "./inline-screen.js";
+import { buildInlineScreenHelpers } from "./inline-screen.js";
+import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from "./screen-config.js";
 export const IMPORTMAP_CHECK_SCRIPT_KEY = "stale-deploy-guard-importmap-check";
-export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
-${INLINE_SCREEN_HELPERS}
+const DEFAULT_CONFIG = {
+  theme: DEFAULT_SCREEN_THEME,
+  texts: DEFAULT_SCREEN_TEXTS
+};
+export function buildImportmapCheckScript(config = DEFAULT_CONFIG) {
+  return String.raw`(function () {
+${buildInlineScreenHelpers(config)}
   if (!doc.querySelector('script[type="importmap"]')) {
     return;
   }
@@ -28,14 +34,11 @@ ${INLINE_SCREEN_HELPERS}
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-labelledby', 'sdg-importmap-title');
   var card = sdgCard(overlay);
-  var title = sdgTitle(card, theme, ios ? 'Версия iOS устарела' : 'Браузер устарел');
+  var title = sdgTitle(card, theme, ios ? CFG.texts.unsupportedIosTitle : CFG.texts.unsupportedBrowserTitle);
   title.id = 'sdg-importmap-title';
   var paragraphs = ios
-    ? [
-        'Нужна iOS 16.4 или новее: Настройки → Основные → Обновление ПО. Другой браузер на этом устройстве не поможет.',
-        'Если обновление недоступно, скопируйте ссылку и откройте её на компьютере.'
-      ]
-    : ['Обновите браузер или откройте эту ссылку в другом браузере.'];
+    ? CFG.texts.unsupportedIosAdvice
+    : [CFG.texts.unsupportedBrowserAdvice];
   for (var i = 0; i < paragraphs.length; i++) {
     sdgText(card, paragraphs[i]);
   }
@@ -49,13 +52,13 @@ ${INLINE_SCREEN_HELPERS}
   field.type = 'text';
   field.readOnly = true;
   field.value = win.location.href;
-  field.setAttribute('aria-label', 'Адрес страницы');
-  var button = sdgButton(card, theme, 'Скопировать ссылку');
+  field.setAttribute('aria-label', CFG.texts.urlFieldLabel);
+  var button = sdgButton(card, theme, CFG.texts.copyLink);
   var note = sdgAdd(card, 'p', 'margin:12px 0 0;min-height:1.5em;font-size:14px;color:' + theme.muted);
   note.setAttribute('aria-live', 'polite');
 
   function report(copied) {
-    note.textContent = copied ? 'Ссылка скопирована' : 'Не удалось скопировать — выделите адрес вручную';
+    note.textContent = copied ? CFG.texts.linkCopied : CFG.texts.copyFailed;
   }
   function copyViaSelection() {
     var copied = false;
@@ -84,3 +87,5 @@ ${INLINE_SCREEN_HELPERS}
 
   sdgShow(overlay);
 })();`;
+}
+export const IMPORTMAP_CHECK_SCRIPT = buildImportmapCheckScript();

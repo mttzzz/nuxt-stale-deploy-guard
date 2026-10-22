@@ -1,4 +1,5 @@
-import { INLINE_SCREEN_HELPERS } from './inline-screen'
+import { buildInlineScreenHelpers, type InlineScreenConfig } from './inline-screen'
+import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
 
 /*
  * Inline-проверка import maps + экран-заглушка для браузеров без их поддержки. Модуль (`module.ts`)
@@ -19,7 +20,7 @@ import { INLINE_SCREEN_HELPERS } from './inline-screen'
  *   3. Общее состояние (`window.__sdgDeadLoad`, см. inline-screen.ts) помечается `takenOver = true` — ДО
  *      `window.stop()`: оборванные остановкой загрузки скриптов entry шлют `error`, и скрипт «страница не
  *      загрузилась» (dead-load.ts) на них не должен ни перезагружать страницу, ни рисовать второй экран, ни
- *      слать `retry-failed`.
+ *      слать `retry-failed`. Этот же флаг гасит watchdog «приложение не загрузилось»: тут отчёт уже есть.
  *   4. `window.stop()`: парсер прерывается, deferred module-скрипты entry не исполняются, приложение не
  *      стартует (SDK тоже — поэтому отчёт шлёт ранний inline-слушатель nuxt-sentry, а не клиентский плагин).
  *   5. Событие `app:chunk-reload-blocked` с `UnsupportedBrowserBlockedDetail`
@@ -37,7 +38,8 @@ import { INLINE_SCREEN_HELPERS } from './inline-screen'
  *
  * Палитра, вёрстка оверлея, отправка события и общее состояние — хелперы из inline-screen.ts (тот же
  * источник у экрана «страница не загрузилась»); там же объяснено, почему скрипт — СТРОКА в синтаксисе ES5
- * и что в её тексте нельзя (бэктики, `${`, `</script`, `<!--`, комментарии — они выше).
+ * и что в её тексте нельзя (бэктики, `${`, `</script`, `<!--`, комментарии — они выше). Палитра и тексты
+ * экрана — опции модуля `theme`/`texts` (дефолты — палитра ai.pushka.biz и её русские тексты).
  *
  * Маркеры экрана (контракт для интеграционных проверок консьюмеров): корневой элемент оверлея несёт
  * атрибут `data-sdg-unsupported` (пустое значение), кнопка копирования — настоящий
@@ -48,8 +50,16 @@ import { INLINE_SCREEN_HELPERS } from './inline-screen'
 /* Ключ дедупа unhead: повторная регистрация (второй вызов setup, layers) не задвоит скрипт. */
 export const IMPORTMAP_CHECK_SCRIPT_KEY = 'stale-deploy-guard-importmap-check'
 
-export const IMPORTMAP_CHECK_SCRIPT = String.raw`(function () {
-${INLINE_SCREEN_HELPERS}
+/* Конфиг экрана по умолчанию — палитра ai.pushka.biz и её тексты. */
+const DEFAULT_CONFIG: InlineScreenConfig = {
+  theme: DEFAULT_SCREEN_THEME,
+  texts: DEFAULT_SCREEN_TEXTS,
+}
+
+/** Текст inline-скрипта проверки import maps с палитрой и текстами проекта. */
+export function buildImportmapCheckScript(config: InlineScreenConfig = DEFAULT_CONFIG): string {
+  return String.raw`(function () {
+${buildInlineScreenHelpers(config)}
   if (!doc.querySelector('script[type="importmap"]')) {
     return;
   }
@@ -76,14 +86,11 @@ ${INLINE_SCREEN_HELPERS}
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-labelledby', 'sdg-importmap-title');
   var card = sdgCard(overlay);
-  var title = sdgTitle(card, theme, ios ? 'Версия iOS устарела' : 'Браузер устарел');
+  var title = sdgTitle(card, theme, ios ? CFG.texts.unsupportedIosTitle : CFG.texts.unsupportedBrowserTitle);
   title.id = 'sdg-importmap-title';
   var paragraphs = ios
-    ? [
-        'Нужна iOS 16.4 или новее: Настройки → Основные → Обновление ПО. Другой браузер на этом устройстве не поможет.',
-        'Если обновление недоступно, скопируйте ссылку и откройте её на компьютере.'
-      ]
-    : ['Обновите браузер или откройте эту ссылку в другом браузере.'];
+    ? CFG.texts.unsupportedIosAdvice
+    : [CFG.texts.unsupportedBrowserAdvice];
   for (var i = 0; i < paragraphs.length; i++) {
     sdgText(card, paragraphs[i]);
   }
@@ -97,13 +104,13 @@ ${INLINE_SCREEN_HELPERS}
   field.type = 'text';
   field.readOnly = true;
   field.value = win.location.href;
-  field.setAttribute('aria-label', 'Адрес страницы');
-  var button = sdgButton(card, theme, 'Скопировать ссылку');
+  field.setAttribute('aria-label', CFG.texts.urlFieldLabel);
+  var button = sdgButton(card, theme, CFG.texts.copyLink);
   var note = sdgAdd(card, 'p', 'margin:12px 0 0;min-height:1.5em;font-size:14px;color:' + theme.muted);
   note.setAttribute('aria-live', 'polite');
 
   function report(copied) {
-    note.textContent = copied ? 'Ссылка скопирована' : 'Не удалось скопировать — выделите адрес вручную';
+    note.textContent = copied ? CFG.texts.linkCopied : CFG.texts.copyFailed;
   }
   function copyViaSelection() {
     var copied = false;
@@ -132,3 +139,6 @@ ${INLINE_SCREEN_HELPERS}
 
   sdgShow(overlay);
 })();`
+}
+
+export const IMPORTMAP_CHECK_SCRIPT = buildImportmapCheckScript()

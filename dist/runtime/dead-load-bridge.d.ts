@@ -4,5 +4,7 @@ export declare const DEAD_LOAD_GLOBAL = "__sdgDeadLoad";
 export interface DeadLoadBridge {
     fail: (kind: RetryFailedKind, error?: unknown, url?: string) => void;
     mounted: () => void;
+    handled?: () => boolean;
 }
 export declare function readDeadLoadBridge(): DeadLoadBridge | undefined;
+export declare function isDeadLoadHandled(bridge: DeadLoadBridge | undefined): boolean;

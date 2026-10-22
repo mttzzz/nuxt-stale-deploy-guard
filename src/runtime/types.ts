@@ -1,3 +1,7 @@
+import type { ResolvedScreenTheme, ScreenTexts, ScreenTextsOption, ScreenThemeOption } from './screen-config'
+
+export type { ResolvedScreenTheme, ScreenTexts, ScreenTextsOption, ScreenThemeOption } from './screen-config'
+
 export interface ModuleOptions {
   /** Имя header'а с build-id. Default: 'x-app-build-id'. */
   buildIdHeader?: string
@@ -10,7 +14,7 @@ export interface ModuleOptions {
   /** Путь service worker. Default: '/service-worker.js'. */
   serviceWorkerPath?: string
   /**
-   * Проактивный poll (мс): раз в интервал HEAD-пробы по текущему пути, reload только когда ВСЕ пробы
+   * Проактивный poll (мс): раз в интервал HEAD-проб по текущему пути, reload только когда ВСЕ пробы
    * единогласно увидели один и тот же чужой build-id (флот сошёлся на новом билде). 0 = выключен.
    * Единственный триггер, перезагружающий работающую вкладку; реактивный путь (stale-chunk ошибка →
    * verify → reload) работает всегда и от этой опции не зависит. Default: 0.
@@ -28,6 +32,25 @@ export interface ModuleOptions {
    * не трогаем. Поставьте `false` если намеренно тестируете guard локально. Default: true.
    */
   skipInDev?: boolean
+  /**
+   * Палитра inline-экранов модуля («браузер без import maps», «страница не загрузилась»): свои цвета
+   * для тёмной и светлой темы. Любое поле можно переопределить по отдельности, не заданное берётся
+   * из дефолта (палитра ai.pushka.biz). Default: undefined (= дефолтная палитра).
+   */
+  theme?: ScreenThemeOption
+  /**
+   * Тексты inline-экранов модуля: заголовки, подсказки, кнопки, aria-label поля с адресом и сообщения
+   * после копирования ссылки. Любую строку можно переопределить по отдельности, не заданная берётся из
+   * дефолта (русские тексты ai.pushka.biz). Default: undefined (= дефолтные тексты).
+   */
+  texts?: ScreenTextsOption
+  /**
+   * Таймаут watchdog'а «приложение не загрузилось» (мс): сколько ждать, пока приложение смонтируется,
+   * прежде чем сообщить событием `app:load-timeout`. Таймер стартует в inline-скрипте из head (то есть
+   * раньше entry), отчёт приходит один раз за документ и только если приложение не смонтировалось и
+   * пользователю не показан экран «страница не загрузилась». 0 = watchdog выключен. Default: 45_000.
+   */
+  loadTimeoutMs?: number
 }
 
 export interface ResolvedModuleOptions {
@@ -40,4 +63,7 @@ export interface ResolvedModuleOptions {
   cooldownMs: number
   circuitBreaker: { maxAttempts: number; windowMs: number }
   skipInDev: boolean
+  theme: ResolvedScreenTheme
+  texts: ScreenTexts
+  loadTimeoutMs: number
 }

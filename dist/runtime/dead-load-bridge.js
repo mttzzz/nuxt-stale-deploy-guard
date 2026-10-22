@@ -7,3 +7,14 @@ export function readDeadLoadBridge() {
   const candidate = Reflect.get(globalThis, DEAD_LOAD_GLOBAL);
   return isDeadLoadBridge(candidate) ? candidate : void 0;
 }
+export function isDeadLoadHandled(bridge) {
+  const handled = bridge?.handled;
+  if (typeof handled !== "function") {
+    return false;
+  }
+  try {
+    return handled();
+  } catch {
+    return false;
+  }
+}

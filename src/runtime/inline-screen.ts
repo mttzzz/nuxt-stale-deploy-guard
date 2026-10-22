@@ -1,24 +1,29 @@
+import { type ResolvedScreenTheme, type ScreenTexts, toInlineScriptLiteral } from './screen-config'
+
 /*
  * Общие ES5-хелперы inline-экранов модуля — ОДИН источник для обоих скриптов, что рисуют полноэкранный
  * оверлей до старта приложения: `importmap-check.ts` («браузер без import maps», `data-sdg-unsupported`) и
  * `dead-load.ts` («страница не загрузилась», `data-sdg-dead-load`). Строка вшивается в начало КАЖДОГО IIFE
- * при сборке текста скрипта (`${INLINE_SCREEN_HELPERS}`), поэтому у скриптов нет общего глобального кода:
+ * при сборке текста скрипта (`buildInlineScreenHelpers`), поэтому у скриптов нет общего глобального кода:
  * хелперы живут в замыкании своего IIFE, в `window` торчит только `__sdgDeadLoad` (см. ниже).
  *
  * Что внутри (все имена с префиксом `sdg`, чтобы не пересекаться с локальными `var` скриптов):
+ *   - `CFG` — конфиг экрана, запечённый в скрипт при сборке: палитра (`CFG.theme.light`/`CFG.theme.dark`),
+ *     тексты (`CFG.texts.*`) и, для скрипта «страница не загрузилась», таймаут watchdog'а
+ *     (`CFG.loadTimeoutMs`). Значения приходят из опций модуля (`theme`, `texts`, `loadTimeoutMs`), а
+ *     не из runtimeConfig: скрипт исполняется до старта приложения и читать runtimeConfig не может.
  *   - `doc`, `win` — `document`/`window`;
  *   - `sdgShared()` — общее состояние скриптов: объект `window.__sdgDeadLoad`. Его создаёт тот из скриптов,
  *     что исполнился первым (dead-load стоит в head, importmap-check — в bodyClose, то есть dead-load первый,
- *     но порядок не должен быть опорой). Поля: `fail`/`mounted` — мост для клиентского плагина (их ставит
- *     dead-load, контракт — `dead-load-bridge.ts`), `takenOver` — importmap-check показал экран «браузер
- *     устарел» и вызвал `window.stop()`: приложение не стартует, а `error` оборванных `window.stop()`
- *     скриптов entry не должны запускать повтор и второй экран;
+ *     но порядок не должен быть опорой). Поля: `fail`/`mounted`/`handled` — мост для клиентского плагина (их
+ *     ставит dead-load, контракт — `dead-load-bridge.ts`; `handled()` — «документ уже пережил сбой»), `takenOver` —
+ *     importmap-check показал экран «браузер устарел» и вызвал `window.stop()`: приложение не стартует, а `error`
+ *     оборванных `window.stop()` скриптов entry не должны запускать повтор и второй экран;
  *   - `sdgEmit(name, detail)` — `CustomEvent` на window с фолбэком `createEvent('CustomEvent')` для браузеров
  *     без конструктора; не бросает;
- *   - `sdgTheme()` — палитра ai.pushka.biz, одинаковая у всех консьюмеров: тёмная по умолчанию (фон #1d161e,
- *     акцент #c084fc); светлая при `html.light` (класс @nuxtjs/color-mode) или, если на <html> нет `.dark`,
- *     при `prefers-color-scheme: light` (фон #ffffff, акцент #9333ea). Считается в момент показа экрана, а не
- *     при старте скрипта: класс на <html> к этому времени уже выставлен;
+ *   - `sdgTheme()` — палитра проекта: тёмная по умолчанию, светлая при `html.light` (класс @nuxtjs/color-mode)
+ *     или, если на <html> нет `.dark`, при `prefers-color-scheme: light`. Считается в момент показа экрана,
+ *     а не при старте скрипта: класс на <html> к этому времени уже выставлен;
  *   - `sdgAdd(parent, tag, css, text)` — `createElement` + `style.cssText` (CSSOM, CSP `style-src` его не
  *     блокирует) + `textContent` (не innerHTML);
  *   - `sdgOverlay(theme)` — fixed-оверлей на весь экран (`z-index: 2147483647`), `sdgCard(overlay)` — колонка
@@ -33,7 +38,23 @@
  * `${...}` в исходнике — вшивание этой строки в скрипты; в итоговом тексте их нет.
  */
 
-export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
+/** Конфиг, запекаемый в inline-скрипт: палитра, тексты и (для dead-load) таймаут watchdog'а. */
+export interface InlineScreenConfig {
+  /** Палитра проекта (тёмная/светлая). */
+  theme: ResolvedScreenTheme
+  /** Тексты экранов. */
+  texts: ScreenTexts
+  /** Таймаут watchdog'а «приложение не загрузилось» (мс). Только для скрипта dead-load. */
+  loadTimeoutMs?: number
+}
+
+/*
+ * Шаблон хелперов. `__SDG_CONFIG__` — место JSON-литерала с палитрой и текстами; заменяется при сборке
+ * скрипта (`buildInlineScreenHelpers`). Замена — функцией, а не строкой: в JSON пользовательских текстов
+ * могут встретиться `$&`/`$$` и т.п., которые `String.replace` иначе разобрал бы как спецпоследовательности.
+ */
+const INLINE_SCREEN_HELPERS_TEMPLATE = String.raw`  var CFG = __SDG_CONFIG__;
+  var doc = document;
   var win = window;
 
   function sdgShared() {
@@ -64,14 +85,15 @@ export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
     if (!light && !/(^|\s)dark(\s|$)/.test(root.className) && win.matchMedia) {
       light = win.matchMedia('(prefers-color-scheme: light)').matches;
     }
+    var palette = light ? CFG.theme.light : CFG.theme.dark;
     return {
-      bg: light ? '#ffffff' : '#1d161e',
-      fg: light ? '#1d161e' : '#f3eef5',
-      muted: light ? '#645369' : '#b9aabf',
-      accent: light ? '#9333ea' : '#c084fc',
-      onAccent: light ? '#ffffff' : '#1d161e',
-      line: light ? '#d9cfe0' : '#4a3b50',
-      fieldBg: light ? '#f6f2f8' : '#271d29'
+      bg: palette.bg,
+      fg: palette.fg,
+      muted: palette.muted,
+      accent: palette.accent,
+      onAccent: palette.onAccent,
+      line: palette.line,
+      fieldBg: palette.fieldBg
     };
   }
 
@@ -123,3 +145,8 @@ export const INLINE_SCREEN_HELPERS = String.raw`  var doc = document;
     (doc.body || doc.documentElement).appendChild(overlay);
   }
 `
+
+/** Хелперы inline-экранов с запечённой палитрой и текстами проекта. */
+export function buildInlineScreenHelpers(config: InlineScreenConfig): string {
+  return INLINE_SCREEN_HELPERS_TEMPLATE.replace('__SDG_CONFIG__', () => toInlineScriptLiteral(config))
+}

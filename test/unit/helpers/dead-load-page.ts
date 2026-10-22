@@ -2,6 +2,7 @@ import { type HTMLElement, Window } from 'happy-dom'
 import { expect, type Mock, vi } from 'vitest'
 
 import { DEAD_LOAD_SCRIPT } from '../../../src/runtime/dead-load'
+import { DEAD_LOAD_GLOBAL } from '../../../src/runtime/dead-load-bridge'
 
 /*
  * Страница для unit-тестов inline-скрипта «мёртвая первая загрузка» (dead-load.ts): изолированное happy-dom-окно,
@@ -25,6 +26,8 @@ export interface PageOptions {
   replaceThrows?: boolean
   /* Скрипт исполняется до того, как парсер дошёл до <body> (сбой пришёл во время разбора head). */
   noBody?: boolean
+  /* Текст скрипта (по умолчанию — дефолтный `DEAD_LOAD_SCRIPT`): для своих палитр/текстов/таймаута. */
+  script?: string
 }
 
 export interface Page {
@@ -32,9 +35,13 @@ export interface Page {
   document: Window['document']
   /* Detail каждого события `app:chunk-reload-blocked`, по порядку. */
   details: unknown[]
+  /* Detail каждого события `app:load-timeout` (watchdog «приложение не загрузилось»), по порядку. */
+  timeouts: unknown[]
   replace: Mock<(url: string) => void>
   reload: Mock<() => void>
   run: () => void
+  /* `app:mounted` от клиентского плагина: мост сообщает скрипту `mounted()`. */
+  mounted: () => void
   /* `vite:preloadError` как его шлёт Vite: Event с `payload`. Возвращает событие (для defaultPrevented). */
   preloadError: (payload?: unknown) => Event
   /* `<script ...>` в DOM; сбой загрузки — `failScript`. */
@@ -49,7 +56,14 @@ export async function closePages(): Promise<void> {
 }
 
 export function createPage(options: PageOptions = {}): Page {
-  const { url = PAGE_URL, htmlClass = '', prefersLight = false, replaceThrows = false, noBody = false } = options
+  const {
+    url = PAGE_URL,
+    htmlClass = '',
+    prefersLight = false,
+    replaceThrows = false,
+    noBody = false,
+    script: scriptText = DEAD_LOAD_SCRIPT,
+  } = options
   const window = new Window({
     url,
     settings: {
@@ -76,19 +90,47 @@ export function createPage(options: PageOptions = {}): Page {
   Object.defineProperty(window.location, 'replace', { value: replace, configurable: true })
   Object.defineProperty(window.location, 'reload', { value: reload, configurable: true })
 
+  /* Таймеры страницы — глобальные: у happy-dom свои, и под vitest'овскими fake timers они не срабатывают.
+     Обращаемся к globalThis в момент вызова, поэтому fake timers работают и после создания окна. */
+  Object.defineProperty(window, 'setTimeout', {
+    value: (callback: () => void, delay?: number) => {
+      globalThis.setTimeout(callback, delay)
+    },
+    configurable: true,
+  })
+  Object.defineProperty(window, 'clearTimeout', {
+    value: (handle?: number) => {
+      globalThis.clearTimeout(handle)
+    },
+    configurable: true,
+  })
+  /* Дата страницы — тоже глобальная: иначе под fake timers окно считает по реальным часам и `elapsedMs`
+     в отчёте watchdog'а не совпадает с ходом тестовых часов. */
+  Object.defineProperty(window, 'Date', { value: globalThis.Date, configurable: true })
+
   const details: unknown[] = []
   window.addEventListener('app:chunk-reload-blocked', (event) => {
     details.push('detail' in event ? event.detail : undefined)
+  })
+
+  const timeouts: unknown[] = []
+  window.addEventListener('app:load-timeout', (event) => {
+    timeouts.push('detail' in event ? event.detail : undefined)
   })
 
   return {
     window,
     document,
     details,
+    timeouts,
     replace,
     reload,
     run() {
-      window.eval(DEAD_LOAD_SCRIPT)
+      window.eval(scriptText)
+    },
+    mounted() {
+      const bridge = Reflect.get(window, DEAD_LOAD_GLOBAL) as { mounted?: () => void } | undefined
+      bridge?.mounted?.()
     },
     preloadError(payload) {
       const event = new window.Event('vite:preloadError', { cancelable: true })
@@ -124,7 +166,7 @@ export function requireScreen(page: Page): HTMLElement {
 }
 
 /* Цвет в том виде, как движок хранит его в style: сравниваем «как записали» без привязки к rgb()/hex. */
-export function normalizedColor(page: Page, color: string) {
+export function normalizedColor(page: { document: Window['document'] }, color: string) {
   const probe = page.document.createElement('div')
   probe.style.backgroundColor = color
   return probe.style.backgroundColor
