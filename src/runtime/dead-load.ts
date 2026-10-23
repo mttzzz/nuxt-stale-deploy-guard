@@ -67,7 +67,8 @@ import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
  *      Экран «браузер без import maps» watchdog тоже гасит (`takenOver`): там отчёт уже есть.
  *      Диагностика считается в момент отчёта. Критичные ресурсы документа: `link[href]` с `stylesheet` (кроме
  *      `alternate`, `disabled` и `media`, которому не отвечает `matchMedia`) и с `modulepreload`; `script[src]`
- *      кроме классических с `async`. `prefetch`/`preload`/`icon`/`preconnect` не в счёт. Критичный ресурс
+ *      кроме классических с `async` или `nomodule` (браузер с module-entry их не грузит, они остались бы «зависшими»;
+ *      на module-скрипты атрибут не действует). `prefetch`/`preload`/`icon`/`preconnect` не в счёт. Критичный ресурс
  *      «завис» (pending), если для его абсолютного URL (`el.href`/`el.src`) нет записи Resource Timing — запись
  *      появляется, когда загрузка завершилась; нет API или он бросил — `pending: []`. Есть зависшие ИЛИ
  *      `readyState === 'loading'` — стадия `network` (`host` — хост первого зависшего ресурса, а если зависших
@@ -254,7 +255,8 @@ ${buildInlineScreenHelpers(config)}
 
   function isCritical(node) {
     if (/^script$/i.test(node.tagName)) {
-      return String(node.type).toLowerCase() === 'module' || !(node.async || node.hasAttribute('async'));
+      var classic = String(node.type).toLowerCase() !== 'module';
+      return !classic || !(node.async || node.hasAttribute('async') || node.hasAttribute('nomodule'));
     }
     var rel = String(node.getAttribute('rel') || '').toLowerCase().split(/\s+/);
     if (rel.indexOf('modulepreload') >= 0) {

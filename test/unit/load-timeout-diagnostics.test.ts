@@ -221,6 +221,10 @@ describe('диагностика — какие ресурсы критичны'
     ['отключённый стиль', '<link rel="stylesheet" href="/off.css" disabled>'],
     ['стиль для печати (media не подходит)', '<link rel="stylesheet" href="/print.css" media="print">'],
     ['классический async-скрипт', '<script async src="https://analytics.example.com/a.js"></script>'],
+    [
+      'классический nomodule-скрипт (браузер с модулями его не грузит)',
+      '<script nomodule src="https://legacy.example.com/polyfills-legacy.js"></script>',
+    ],
   ])('не критичен: %s', (_name, markup) => {
     const page = startPage(markup)
 
@@ -235,10 +239,32 @@ describe('диагностика — какие ресурсы критичны'
     ['defer-скрипт', '<script defer src="/a.js"></script>', 'app.example.com/a.js'],
     ['module-скрипт', `<script type="module" src="${CDN}/a.js"></script>`, 'cdn.example.com/_nuxt/a.js'],
     ['module-скрипт с async', `<script type="module" async src="${CDN}/a.js"></script>`, 'cdn.example.com/_nuxt/a.js'],
+    [
+      'module-скрипт с nomodule (атрибут действует только на классические)',
+      `<script type="module" nomodule src="${CDN}/a.js"></script>`,
+      'cdn.example.com/_nuxt/a.js',
+    ],
   ])('критичен: %s', (_name, markup, pending) => {
     const page = startPage(markup)
 
     expect(report(page)).toMatchObject({ stage: 'network', pending: [pending], pendingCount: 1, criticalCount: 1 })
+  })
+
+  it('nomodule-скрипт не становится «первым зависшим хостом»: host и pending — по настоящему зависшему ресурсу', () => {
+    const page = startPage(`
+      <script nomodule src="https://legacy.example.com/polyfills-legacy.js"></script>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope">
+      <script type="module" src="${CDN}/entry.js"></script>
+    `)
+    page.resourceEntries.push(`${CDN}/entry.js`)
+
+    expect(report(page)).toMatchObject({
+      stage: 'network',
+      host: 'fonts.googleapis.com',
+      pending: ['fonts.googleapis.com/css2'],
+      pendingCount: 1,
+      criticalCount: 2,
+    })
   })
 })
 

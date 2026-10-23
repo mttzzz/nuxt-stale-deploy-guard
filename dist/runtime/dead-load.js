@@ -147,7 +147,8 @@ ${buildInlineScreenHelpers(config)}
 
   function isCritical(node) {
     if (/^script$/i.test(node.tagName)) {
-      return String(node.type).toLowerCase() === 'module' || !(node.async || node.hasAttribute('async'));
+      var classic = String(node.type).toLowerCase() !== 'module';
+      return !classic || !(node.async || node.hasAttribute('async') || node.hasAttribute('nomodule'));
     }
     var rel = String(node.getAttribute('rel') || '').toLowerCase().split(/\s+/);
     if (rel.indexOf('modulepreload') >= 0) {

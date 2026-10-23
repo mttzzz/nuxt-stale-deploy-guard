@@ -85,8 +85,10 @@ export interface LoadTimeoutError {
  *  сбой (`chunk` | `entry`), иначе поля нет: сбоя не было, приложение просто не стартовало. Остальное — диагностика
  *  на момент отчёта:
  *   - «критичные» ресурсы документа: `link[href]` с `stylesheet` (кроме `alternate`, `disabled` и `media`,
- *     которому не отвечает `matchMedia`) и с `modulepreload`; `script[src]` кроме классических с `async`.
- *     `prefetch`/`preload`/`icon`/`preconnect` не критичны. `criticalCount` — сколько их в документе;
+ *     которому не отвечает `matchMedia`) и с `modulepreload`; `script[src]` кроме классических (не `module`) с
+ *     `async` или `nomodule` — браузер, исполняющий module-entry, `nomodule`-скрипты не грузит, и они вечно числились
+ *     бы «зависшими» (на `type="module"` атрибут `nomodule` не действует). `prefetch`/`preload`/`icon`/`preconnect`
+ *     не критичны. `criticalCount` — сколько их в документе;
  *   - `pending` — «зависшие» критичные ресурсы: у абсолютного URL (`el.href`/`el.src`) нет записи в
  *     `performance.getEntriesByType('resource')` (она появляется, когда загрузка завершилась). Не больше 5,
  *     в порядке документа, каждый как `host + pathname` (без query и hash), обрезан до 120 символов;
