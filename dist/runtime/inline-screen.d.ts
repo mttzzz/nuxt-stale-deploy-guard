@@ -5,7 +5,7 @@ export interface InlineScreenConfig {
     theme: ResolvedScreenTheme;
     /** Тексты экранов. */
     texts: ScreenTexts;
-    /** Таймаут watchdog'а «приложение не загрузилось» (мс). Только для скрипта dead-load. */
+    /** Порог ВИДИМОГО времени watchdog'а «приложение не загрузилось» (мс). Только для скрипта dead-load. */
     loadTimeoutMs?: number;
 }
 /** Хелперы inline-экранов с запечённой палитрой и текстами проекта. */

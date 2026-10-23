@@ -97,17 +97,18 @@ describe('модуль — опции проекта в inline-скриптах'
     await closePages()
   })
 
-  it("таймаут watchdog'а из опций модуля доезжает до скрипта", async () => {
-    const script = await scriptText({ dev: false, key: DEAD_LOAD_SCRIPT_KEY, guard: { loadTimeoutMs: 1234 } })
+  it("порог watchdog'а из опций модуля доезжает до скрипта", async () => {
+    const script = await scriptText({ dev: false, key: DEAD_LOAD_SCRIPT_KEY, guard: { loadTimeoutMs: 3000 } })
 
     vi.useFakeTimers()
     try {
       const page = createPage({ script })
       page.run()
-      vi.advanceTimersByTime(1233)
+      vi.advanceTimersByTime(2999)
       expect(page.timeouts).toEqual([])
       vi.advanceTimersByTime(1)
       expect(page.timeouts).toHaveLength(1)
+      expect(page.timeouts[0]).toMatchObject({ timeoutMs: 3000, visibleMs: 3000 })
     } finally {
       vi.useRealTimers()
       await closePages()

@@ -43,15 +43,37 @@ import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
  *   6. Если сработал экран «браузер без import maps» (importmap-check.ts, `window.stop()`), скрипт не делает
  *      ничего: общее состояние `__sdgDeadLoad.takenOver` выставлено ДО остановки, а `error` оборванных ею
  *      скриптов entry не должны ни перезагружать страницу, ни рисовать второй экран.
- *   7. Watchdog «приложение не загрузилось»: таймер на `loadTimeoutMs` (дефолт 45 с) стартует в момент
- *      исполнения скрипта (он в head, значит раньше entry). Если к сроку приложение НЕ смонтировалось и
- *      пользователю НЕ показан экран «страница не загрузилась» — событие `app:load-timeout`
- *      (`{ reason: 'load-timeout', timeoutMs, elapsedMs, url, kind? }`, контракт — chunk-reload-guard.ts).
- *      Ровно один раз за документ. Смысл: поймать «мёртвую первую загрузку» без ошибки в консоли (зависший
- *      entry, минувший CDN, редирект на пустую страницу) — там, где ни один обработчик сбоя не сработал и
- *      в Sentry тишина. Автоповтор watchdog НЕ гасит: страница должна была уйти на перезагрузку; если не
- *      ушла — это ровно тот случай, о котором нужен отчёт (в detail попадает `kind` увиденного сбоя).
+ *   7. Watchdog «приложение не загрузилось»: копит ВИДИМОЕ время (`loadTimeoutMs`, дефолт 45 с) с момента
+ *      исполнения скрипта (он в head, значит раньше entry). Ждать таймером «на всё время» нельзя: у вкладки в
+ *      фоне, заморозке или сне таймеры спят или срабатывают с опозданием, и отчёт «не загрузилось за 45 с»
+ *      приходил от вкладки, которую никто не видел (Sentry KP-MODMB-COM-1J: 4 из 10 событий — восстановление
+ *      сессии Chrome с девятью фоновыми вкладками и замороженная вкладка Android). Поэтому раз в секунду тик
+ *      (`setInterval`) прибавляет к счётчику `min(прошло с прошлого тика, 2 с)` — и только пока
+ *      `document.visibilityState` не `hidden` (устаревшее `prerender` — тоже скрыта; нет свойства — видима).
+ *      Прошлый тик обновляется ВСЕГДА, а `visibilitychange` при возврате во вкладку сбрасывает его заново:
+ *      скрытый кусок не засчитывается. Потолок в 2 с превращает «тиков не было, потом один с огромной разницей»
+ *      (заморозка, сон ноутбука, скачок часов) в обычные 2 с, а не в десять минут «видимого» ожидания. Вкладка,
+ *      которая так и не стала видимой, не шлёт ничего. Тик останавливается на `mounted()`, на отчёте, на экране
+ *      «страница не загрузилась» и на `takenOver`; `loadTimeoutMs: 0` — тика нет вовсе.
+ *      Счётчик дорос до `loadTimeoutMs`, а приложение НЕ смонтировалось и пользователю НЕ показан экран «страница
+ *      не загрузилась» — событие `app:load-timeout` (контракт `LoadTimeoutDetail` — chunk-reload-guard.ts:
+ *      `timeoutMs`, `visibleMs`, `hiddenMs`, `elapsedMs`, `url`, `kind?` и диагностика `stage`, `host?`,
+ *      `readyState`, `online`, `pending`, `pendingCount`, `criticalCount`, `vueMounted`, `errors`). Ровно один
+ *      раз за документ, в момент достижения порога: ни дополнительных событий, ни отложенной отправки на
+ *      `pagehide`. Смысл: поймать «мёртвую первую загрузку» без ошибки в консоли (зависший entry, минувший
+ *      CDN, зависший стиль в head, редирект на пустую страницу) — там, где ни один обработчик сбоя не
+ *      сработал и в Sentry тишина. Автоповтор watchdog НЕ гасит: страница должна была уйти на перезагрузку;
+ *      если не ушла — это ровно тот случай, о котором нужен отчёт (в detail попадает `kind` увиденного сбоя).
  *      Экран «браузер без import maps» watchdog тоже гасит (`takenOver`): там отчёт уже есть.
+ *      Диагностика считается в момент отчёта. Критичные ресурсы документа: `link[href]` с `stylesheet` (кроме
+ *      `alternate`, `disabled` и `media`, которому не отвечает `matchMedia`) и с `modulepreload`; `script[src]`
+ *      кроме классических с `async`. `prefetch`/`preload`/`icon`/`preconnect` не в счёт. Критичный ресурс
+ *      «завис» (pending), если для его абсолютного URL (`el.href`/`el.src`) нет записи Resource Timing — запись
+ *      появляется, когда загрузка завершилась; нет API или он бросил — `pending: []`. Есть зависшие ИЛИ
+ *      `readyState === 'loading'` — стадия `network` (`host` — хост первого зависшего ресурса, а если зависших
+ *      нет и документ ещё стримится, то `location.host`), иначе `boot`: всё пришло, приложение не поднялось.
+ *      `errors` — первые три ошибки ДО монтирования: runtime-`error` на window (сбои загрузки элементов сюда не
+ *      попадают: у них есть канал entry) и `unhandledrejection`.
  *
  * Мост для клиентского плагина — глобал `window.__sdgDeadLoad` (общее состояние из inline-screen.ts):
  *   - `fail(kind, error?, url?)` — сообщить о pre-mount сбое (`kind`: `'chunk'` | `'entry'`; иное значение
@@ -82,7 +104,7 @@ export const DEAD_LOAD_SCRIPT_KEY = 'stale-deploy-guard-dead-load'
    после import map Nuxt (-2) и позже `<meta charset>` (-20), viewport (-15), CSP (-30) и base (-10). */
 export const DEAD_LOAD_SCRIPT_PRIORITY = -1
 
-/* Таймаут watchdog'а «приложение не загрузилось» по умолчанию (45 с). */
+/* Порог видимого времени watchdog'а «приложение не загрузилось» по умолчанию (45 с). */
 export const DEFAULT_LOAD_TIMEOUT_MS = 45_000
 
 /* Конфиг экрана по умолчанию — палитра ai.pushka.biz, её тексты и дефолтный таймаут watchdog'а. */
@@ -98,6 +120,12 @@ export function buildDeadLoadScript(config: InlineScreenConfig = DEFAULT_CONFIG)
 ${buildInlineScreenHelpers(config)}
   var MARKER = 'sdg-retry';
   var TIMEOUT_MS = CFG.loadTimeoutMs;
+  var TICK_MS = 1000;
+  var TICK_CAP_MS = TICK_MS * 2;
+  var PENDING_LIMIT = 5;
+  var ERRORS_LIMIT = 3;
+  var PATH_LIMIT = 120;
+  var MESSAGE_LIMIT = 200;
   var shared = sdgShared();
   var handled = false;
   var mounted = false;
@@ -105,11 +133,18 @@ ${buildInlineScreenHelpers(config)}
   var lastKind = null;
   var current = null;
   var startedAt = Date.now();
+  var lastTick = startedAt;
+  var visibleMs = 0;
   var watchdogTimer = null;
   var reported = false;
+  var errors = [];
 
   if (TIMEOUT_MS > 0) {
-    watchdogTimer = win.setTimeout(onTimeout, TIMEOUT_MS);
+    try {
+      watchdogTimer = win.setInterval(onTick, TICK_MS);
+      doc.addEventListener('visibilitychange', onVisibility);
+      win.addEventListener('unhandledrejection', onRejection);
+    } catch (e) {}
   }
 
   function hasMarker() {
@@ -128,28 +163,189 @@ ${buildInlineScreenHelpers(config)}
   function stopWatchdog() {
     if (watchdogTimer !== null) {
       try {
-        win.clearTimeout(watchdogTimer);
+        win.clearInterval(watchdogTimer);
       } catch (e) {}
       watchdogTimer = null;
     }
+    try {
+      doc.removeEventListener('visibilitychange', onVisibility);
+      win.removeEventListener('unhandledrejection', onRejection);
+    } catch (e) {}
   }
 
-  function onTimeout() {
-    watchdogTimer = null;
+  function isVisible() {
+    var state = doc.visibilityState;
+    return state !== 'hidden' && state !== 'prerender';
+  }
+
+  function onVisibility() {
+    if (isVisible()) {
+      lastTick = Date.now();
+    }
+  }
+
+  function onTick() {
     if (reported || mounted || failureScreenShown || shared.takenOver) {
+      stopWatchdog();
       return;
     }
+    var now = Date.now();
+    var gap = now - lastTick;
+    lastTick = now;
+    if (gap > 0 && isVisible()) {
+      visibleMs += gap < TICK_CAP_MS ? gap : TICK_CAP_MS;
+    }
+    if (visibleMs >= TIMEOUT_MS) {
+      report(now);
+    }
+  }
+
+  function report(now) {
     reported = true;
+    stopWatchdog();
+    var elapsed = now - startedAt;
     var detail = {
       reason: 'load-timeout',
       timeoutMs: TIMEOUT_MS,
-      elapsedMs: Date.now() - startedAt,
+      visibleMs: visibleMs,
+      hiddenMs: elapsed > visibleMs ? elapsed - visibleMs : 0,
+      elapsedMs: elapsed,
       url: win.location.href
     };
     if (lastKind) {
       detail.kind = lastKind;
     }
+    try {
+      describeLoad(detail);
+    } catch (e) {}
     sdgEmit('app:load-timeout', detail);
+  }
+
+  function describeLoad(detail) {
+    var scan = scanCritical();
+    var readyState = String(doc.readyState);
+    var nav = win.navigator;
+    detail.stage = scan.pendingCount > 0 || readyState === 'loading' ? 'network' : 'boot';
+    if (detail.stage === 'network') {
+      detail.host = scan.firstHost || win.location.host;
+    }
+    detail.readyState = readyState;
+    detail.online = !nav || typeof nav.onLine !== 'boolean' || nav.onLine;
+    detail.pending = scan.pending;
+    detail.pendingCount = scan.pendingCount;
+    detail.criticalCount = scan.criticalCount;
+    detail.vueMounted = hasVueApp();
+    detail.errors = errors;
+  }
+
+  function urlParts(value) {
+    var link = doc.createElement('a');
+    link.href = value;
+    return { host: link.host, path: (link.host + link.pathname).slice(0, PATH_LIMIT) };
+  }
+
+  function mediaMatches(media) {
+    try {
+      return !win.matchMedia || win.matchMedia(media).matches;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function isCritical(node) {
+    if (/^script$/i.test(node.tagName)) {
+      return String(node.type).toLowerCase() === 'module' || !(node.async || node.hasAttribute('async'));
+    }
+    var rel = String(node.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.indexOf('modulepreload') >= 0) {
+      return true;
+    }
+    if (rel.indexOf('stylesheet') < 0 || rel.indexOf('alternate') >= 0) {
+      return false;
+    }
+    if (node.disabled || node.hasAttribute('disabled')) {
+      return false;
+    }
+    var media = node.getAttribute('media');
+    return !media || mediaMatches(media);
+  }
+
+  function loadedResources() {
+    try {
+      var perf = win.performance;
+      if (!perf || typeof perf.getEntriesByType !== 'function') {
+        return null;
+      }
+      var entries = perf.getEntriesByType('resource');
+      var loaded = {};
+      for (var i = 0; i < entries.length; i++) {
+        loaded[entries[i].name] = true;
+      }
+      return loaded;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function scanCritical() {
+    var scan = { criticalCount: 0, pending: [], pendingCount: 0, firstHost: '' };
+    try {
+      var loaded = loadedResources();
+      var nodes = doc.querySelectorAll('link[href], script[src]');
+      for (var i = 0; i < nodes.length; i++) {
+        var node = nodes[i];
+        if (!isCritical(node)) {
+          continue;
+        }
+        scan.criticalCount++;
+        var url = /^script$/i.test(node.tagName) ? node.src : node.href;
+        if (loaded === null || loaded[url] === true) {
+          continue;
+        }
+        scan.pendingCount++;
+        if (scan.pendingCount <= PENDING_LIMIT) {
+          var parts = urlParts(url);
+          scan.pending.push(parts.path);
+          if (scan.pendingCount === 1) {
+            scan.firstHost = parts.host;
+          }
+        }
+      }
+    } catch (e) {}
+    return scan;
+  }
+
+  function hasVueApp() {
+    try {
+      return !!doc.querySelector('[data-v-app]');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function noteError(message, filename, line, column) {
+    if (TIMEOUT_MS <= 0 || mounted || reported || errors.length >= ERRORS_LIMIT) {
+      return;
+    }
+    try {
+      var item = { message: String(message).slice(0, MESSAGE_LIMIT) };
+      if (filename) {
+        item.source = urlParts(filename).path + ':' + (line || 0) + ':' + (column || 0);
+      }
+      errors.push(item);
+    } catch (e) {}
+  }
+
+  function rejectionMessage(reason) {
+    try {
+      return reason && typeof reason.message === 'string' ? reason.message : String(reason);
+    } catch (e) {
+      return 'unknown';
+    }
+  }
+
+  function onRejection(event) {
+    noteError(rejectionMessage(event ? event.reason : undefined));
   }
 
   function present(state) {
@@ -202,6 +398,7 @@ ${buildInlineScreenHelpers(config)}
       } catch (e) {}
     }
     failureScreenShown = true;
+    stopWatchdog();
     try {
       present('failed');
     } catch (e) {}
@@ -222,12 +419,13 @@ ${buildInlineScreenHelpers(config)}
     'error',
     function (event) {
       var target = event ? event.target : null;
-      if (
-        !target ||
-        !/^script$/i.test(target.tagName || '') ||
-        String(target.type).toLowerCase() !== 'module' ||
-        !target.src
-      ) {
+      if (!target || !target.tagName) {
+        if (event && typeof event.message === 'string') {
+          noteError(event.message, event.filename, event.lineno, event.colno);
+        }
+        return;
+      }
+      if (!/^script$/i.test(target.tagName) || String(target.type).toLowerCase() !== 'module' || !target.src) {
         return;
       }
       fail('entry', undefined, target.src);
