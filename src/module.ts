@@ -117,6 +117,10 @@ export default defineNuxtModule<ModuleOptions>({
      *       `<script type="importmap">`, без поддержки страница падает на 500 `Module specifier '#entry'`, а
      *       guard молча глотает ошибку — прод-инцидент ai.pushka.biz 15.10.2026). bodyClose: importmap из head
      *       уже в DOM, скрипт исполняется при парсинге — раньше deferred module-скриптов entry.
+     *    в) Метка SSR (plugin.server.ts): серверный плагин ставит `<html data-sdg-ssr="">` на документ, отрендеренный
+     *       на сервере, а скрипт «страница не загрузилась» на таком документе не прячет содержимое (ни оверлея, ни
+     *       перезагрузки, ни события). В SPA-оболочке плагины на сервере не исполняются — метки там нет. Читает метку
+     *       только этот скрипт, поэтому плагин подключается в том же условии, что и скрипты (в dev их нет).
      *
      *    Палитра и тексты экранов — опции модуля (`theme`, `texts`): они запекаются в текст скриптов на
      *    этапе сборки (скрипт исполняется до старта приложения и runtimeConfig не читает).
@@ -137,6 +141,7 @@ export default defineNuxtModule<ModuleOptions>({
           tagPosition: 'bodyClose',
         },
       )
+      addPlugin({ src: resolver.resolve('./runtime/plugin.server'), mode: 'server' })
     }
   },
 })

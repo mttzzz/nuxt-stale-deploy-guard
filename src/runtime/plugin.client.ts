@@ -38,6 +38,10 @@ import { isStaleChunkError } from './stale-chunk'
  * страницы ошибки — сбой доходит до guard уже ПОСЛЕ монтирования, прыгает «билд актуален» и шлёт ложный
  * `not-stale` (Sentry KP-MODMB-COM-1H, 21.10.2026).
  *
+ * На документе, отрендеренном на сервере (метка `data-sdg-ssr` на `<html>`), скрипт сбой до монтирования не
+ * повторяет и экрана не рисует — страница читается без JS, — а молча поглощает и тоже отвечает `handled()`
+ * истиной: для плагина такой документ мёртв так же, как после автоповтора (см. `dead-load.ts`, пункт 8).
+ *
  * Build-id берём из `runtimeConfig.app.buildId` (Nuxt автогенерит).
  * Server build-id фетчим HEAD-запросом по текущему URL и читаем header
  * (имя из `runtimeConfig.public.staleDeployGuard.buildIdHeader`).

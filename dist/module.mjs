@@ -93,6 +93,7 @@ const module$1 = defineNuxtModule({
           tagPosition: "bodyClose"
         }
       );
+      addPlugin({ src: resolver.resolve("./runtime/plugin.server"), mode: "server" });
     }
   }
 });

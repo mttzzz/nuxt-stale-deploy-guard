@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { IMPORTMAP_CHECK_SCRIPT } from '../../src/runtime/importmap-check'
 import { closeBuiltPages, openBuiltPage } from './helpers/built-page'
-import { deadLoadSuite } from './helpers/dead-load-suite'
+import { deadLoadSuite, ssrDocumentSuite } from './helpers/dead-load-suite'
 
 /*
  * Fixture `ssr`: Nuxt 4.1+ кладёт entry в `<script type="importmap">` (vite.build.target: esnext снимает
  * ограничение «все цели сборки поддерживают import maps») — ровно как у ai.pushka.biz, где iPhone на iOS 16.0.2
  * падал на `Module specifier '#entry'`. Проверяем настоящую страницу прод-сборки, а не строку из исходника.
+ * Страница отрендерена на сервере, поэтому на <html> стоит метка `data-sdg-ssr`, а сбой entry содержимое не
+ * прячет (ssrDocumentSuite); экран «браузер без import maps» метка не отменяет (тесты ниже).
  */
 await setup({
   rootDir: fileURLToPath(new URL('../fixtures/ssr', import.meta.url)),
@@ -76,3 +78,4 @@ describe('inline-проверка import maps в странице прод-сб�
 })
 
 deadLoadSuite(async () => $fetch<string>('/'))
+ssrDocumentSuite(async () => $fetch<string>('/'))

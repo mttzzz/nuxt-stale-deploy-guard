@@ -1,4 +1,5 @@
 import { buildInlineScreenHelpers, type InlineScreenConfig } from './inline-screen'
+import { LOAD_SCAN_HELPERS } from './load-scan'
 import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
 
 /*
@@ -65,16 +66,23 @@ import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
  *      сработал и в Sentry тишина. Автоповтор watchdog НЕ гасит: страница должна была уйти на перезагрузку;
  *      если не ушла — это ровно тот случай, о котором нужен отчёт (в detail попадает `kind` увиденного сбоя).
  *      Экран «браузер без import maps» watchdog тоже гасит (`takenOver`): там отчёт уже есть.
- *      Диагностика считается в момент отчёта. Критичные ресурсы документа: `link[href]` с `stylesheet` (кроме
- *      `alternate`, `disabled` и `media`, которому не отвечает `matchMedia`) и с `modulepreload`; `script[src]`
- *      кроме классических с `async` или `nomodule` (браузер с module-entry их не грузит, они остались бы «зависшими»;
- *      на module-скрипты атрибут не действует). `prefetch`/`preload`/`icon`/`preconnect` не в счёт. Критичный ресурс
- *      «завис» (pending), если для его абсолютного URL (`el.href`/`el.src`) нет записи Resource Timing — запись
- *      появляется, когда загрузка завершилась; нет API или он бросил — `pending: []`. Есть зависшие ИЛИ
- *      `readyState === 'loading'` — стадия `network` (`host` — хост первого зависшего ресурса, а если зависших
- *      нет и документ ещё стримится, то `location.host`), иначе `boot`: всё пришло, приложение не поднялось.
- *      `errors` — первые три ошибки ДО монтирования: runtime-`error` на window (сбои загрузки элементов сюда не
- *      попадают: у них есть канал entry) и `unhandledrejection`.
+ *      Диагностика считается в момент отчёта. Критичные ресурсы документа и то, «завис» ли ресурс (нет записи
+ *      Resource Timing), — скан из load-scan.ts. Есть зависшие ИЛИ `readyState === 'loading'` — стадия `network`
+ *      (`host` — хост первого зависшего ресурса, а если зависших нет и документ ещё стримится, то `location.host`),
+ *      иначе `boot`: всё пришло, приложение не поднялось. `errors` — первые три ошибки ДО монтирования:
+ *      runtime-`error` на window (сбои загрузки элементов сюда не попадают: у них есть канал entry) и
+ *      `unhandledrejection`.
+ *   8. SSR-документ. Серверный плагин модуля (`plugin.server.ts`) ставит на `<html>` атрибут `data-sdg-ssr`
+ *      (`SSR_MARKER_ATTR`, dead-load-bridge.ts); скрипт читает его ОДИН раз при старте (атрибуты `<html>` разобраны
+ *      раньше head-скриптов), поэтому поздние правки атрибута другим кодом ничего не меняют. Такой
+ *      документ не мёртв: содержимое уже в HTML и читается, обычные ссылки работают без JS, а оверлей или
+ *      перезагрузка спрятали бы работающую страницу. На помеченном документе `fail()` не рисует оверлей, не зовёт
+ *      `location.replace` и не шлёт `app:chunk-reload-blocked` — только помечает документ пережившим сбой
+ *      (`handled()` → true: клиентский плагин молчит) и выходит; watchdog шлёт `app:load-timeout` ТОЛЬКО если среди
+ *      зависших критичных ресурсов есть стиль (`stylePending`: пока он не пришёл, отрисовка заблокирована и страница
+ *      действительно пуста), иначе молча останавливается. Документ без метки — SPA-оболочка (при `ssr: false`,
+ *      глобальном или по `routeRules`, Nuxt не создаёт приложение на сервере и серверные плагины там не
+ *      исполняются) — ведёт себя ровно как в пунктах 1–7.
  *
  * Мост для клиентского плагина — глобал `window.__sdgDeadLoad` (общее состояние из inline-screen.ts):
  *   - `fail(kind, error?, url?)` — сообщить о pre-mount сбое (`kind`: `'chunk'` | `'entry'`; иное значение
@@ -82,10 +90,11 @@ import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
  *   - `mounted()` — приложение смонтировалось: дальше скрипт ни на что не реагирует (уже показанный экран
  *     не убирается: смонтированное приложение могло показать страницу ошибки Nuxt, и он честнее) и
  *     останавливается watchdog;
- *   - `handled()` — «этот документ уже пережил сбой»: true с первого обработанного `fail` (и ветка автоповтора,
- *     и ветка экрана «не загрузилась»), дальше только true. Нужен клиентскому плагину: после автоповтора или
- *     экрана документ уходит (навигация обрывает загрузку CSS его страницы ошибки) — и любой его сбой после
- *     этого не должен превращаться в ложный «билд актуален» (Sentry KP-MODMB-COM-1H, 21.10.2026).
+ *   - `handled()` — «этот документ уже пережил сбой»: true с первого обработанного `fail` (ветка автоповтора,
+ *     ветка экрана «не загрузилась» и молчаливое поглощение сбоя на SSR-документе), дальше только true. Нужен
+ *     клиентскому плагину: после автоповтора или экрана документ уходит (навигация обрывает загрузку CSS его
+ *     страницы ошибки) — и любой его сбой после этого не должен превращаться в ложный «билд актуален» (Sentry
+ *     KP-MODMB-COM-1H, 21.10.2026).
  * Типы и чтение моста — `dead-load-bridge.ts` (плагин не импортирует этот модуль, чтобы текст скрипта не попал
  * в клиентский бандл). Нет глобала (dev, старый кешированный HTML) — плагин работает как раньше.
  *
@@ -119,13 +128,13 @@ const DEFAULT_CONFIG: InlineScreenConfig = {
 export function buildDeadLoadScript(config: InlineScreenConfig = DEFAULT_CONFIG): string {
   return String.raw`(function () {
 ${buildInlineScreenHelpers(config)}
+${LOAD_SCAN_HELPERS}
   var MARKER = 'sdg-retry';
+  var SSR_ATTR = 'data-sdg-ssr';
   var TIMEOUT_MS = CFG.loadTimeoutMs;
   var TICK_MS = 1000;
   var TICK_CAP_MS = TICK_MS * 2;
-  var PENDING_LIMIT = 5;
   var ERRORS_LIMIT = 3;
-  var PATH_LIMIT = 120;
   var MESSAGE_LIMIT = 200;
   var shared = sdgShared();
   var handled = false;
@@ -139,6 +148,10 @@ ${buildInlineScreenHelpers(config)}
   var watchdogTimer = null;
   var reported = false;
   var errors = [];
+  var ssr = false;
+  try {
+    ssr = doc.documentElement.hasAttribute(SSR_ATTR);
+  } catch (e) {}
 
   if (TIMEOUT_MS > 0) {
     try {
@@ -204,6 +217,10 @@ ${buildInlineScreenHelpers(config)}
   function report(now) {
     reported = true;
     stopWatchdog();
+    var scan = scanCritical();
+    if (ssr && !scan.stylePending) {
+      return;
+    }
     var elapsed = now - startedAt;
     var detail = {
       reason: 'load-timeout',
@@ -217,13 +234,12 @@ ${buildInlineScreenHelpers(config)}
       detail.kind = lastKind;
     }
     try {
-      describeLoad(detail);
+      describeLoad(detail, scan);
     } catch (e) {}
     sdgEmit('app:load-timeout', detail);
   }
 
-  function describeLoad(detail) {
-    var scan = scanCritical();
+  function describeLoad(detail, scan) {
     var readyState = String(doc.readyState);
     var nav = win.navigator;
     detail.stage = scan.pendingCount > 0 || readyState === 'loading' ? 'network' : 'boot';
@@ -237,92 +253,6 @@ ${buildInlineScreenHelpers(config)}
     detail.criticalCount = scan.criticalCount;
     detail.vueMounted = hasVueApp();
     detail.errors = errors;
-  }
-
-  function urlParts(value) {
-    var link = doc.createElement('a');
-    link.href = value;
-    return { host: link.host, path: (link.host + link.pathname).slice(0, PATH_LIMIT) };
-  }
-
-  function mediaMatches(media) {
-    try {
-      return !win.matchMedia || win.matchMedia(media).matches;
-    } catch (e) {
-      return true;
-    }
-  }
-
-  function isCritical(node) {
-    if (/^script$/i.test(node.tagName)) {
-      var classic = String(node.type).toLowerCase() !== 'module';
-      return !classic || !(node.async || node.hasAttribute('async') || node.hasAttribute('nomodule'));
-    }
-    var rel = String(node.getAttribute('rel') || '').toLowerCase().split(/\s+/);
-    if (rel.indexOf('modulepreload') >= 0) {
-      return true;
-    }
-    if (rel.indexOf('stylesheet') < 0 || rel.indexOf('alternate') >= 0) {
-      return false;
-    }
-    if (node.disabled || node.hasAttribute('disabled')) {
-      return false;
-    }
-    var media = node.getAttribute('media');
-    return !media || mediaMatches(media);
-  }
-
-  function loadedResources() {
-    try {
-      var perf = win.performance;
-      if (!perf || typeof perf.getEntriesByType !== 'function') {
-        return null;
-      }
-      var entries = perf.getEntriesByType('resource');
-      var loaded = {};
-      for (var i = 0; i < entries.length; i++) {
-        loaded[entries[i].name] = true;
-      }
-      return loaded;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function scanCritical() {
-    var scan = { criticalCount: 0, pending: [], pendingCount: 0, firstHost: '' };
-    try {
-      var loaded = loadedResources();
-      var nodes = doc.querySelectorAll('link[href], script[src]');
-      for (var i = 0; i < nodes.length; i++) {
-        var node = nodes[i];
-        if (!isCritical(node)) {
-          continue;
-        }
-        scan.criticalCount++;
-        var url = /^script$/i.test(node.tagName) ? node.src : node.href;
-        if (loaded === null || loaded[url] === true) {
-          continue;
-        }
-        scan.pendingCount++;
-        if (scan.pendingCount <= PENDING_LIMIT) {
-          var parts = urlParts(url);
-          scan.pending.push(parts.path);
-          if (scan.pendingCount === 1) {
-            scan.firstHost = parts.host;
-          }
-        }
-      }
-    } catch (e) {}
-    return scan;
-  }
-
-  function hasVueApp() {
-    try {
-      return !!doc.querySelector('[data-v-app]');
-    } catch (e) {
-      return false;
-    }
   }
 
   function noteError(message, filename, line, column) {
@@ -390,6 +320,9 @@ ${buildInlineScreenHelpers(config)}
     handled = true;
     var type = kind === 'entry' ? 'entry' : 'chunk';
     lastKind = type;
+    if (ssr) {
+      return;
+    }
     if (!hasMarker()) {
       try {
         present('loading');

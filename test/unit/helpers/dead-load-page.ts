@@ -2,7 +2,7 @@ import { type HTMLElement, Window } from 'happy-dom'
 import { expect, type Mock, vi } from 'vitest'
 
 import { buildDeadLoadScript, DEAD_LOAD_SCRIPT } from '../../../src/runtime/dead-load'
-import { DEAD_LOAD_GLOBAL } from '../../../src/runtime/dead-load-bridge'
+import { DEAD_LOAD_GLOBAL, SSR_MARKER_ATTR } from '../../../src/runtime/dead-load-bridge'
 import { DEFAULT_SCREEN_TEXTS, DEFAULT_SCREEN_THEME } from '../../../src/runtime/screen-config'
 
 /*
@@ -30,6 +30,8 @@ export interface PageOptions {
   replaceThrows?: boolean
   /* Скрипт исполняется до того, как парсер дошёл до <body> (сбой пришёл во время разбора head). */
   noBody?: boolean
+  /* Документ отрендерен на сервере: на <html> стоит метка `data-sdg-ssr` (её ставит серверный плагин модуля). */
+  ssr?: boolean
   /* Текст скрипта (по умолчанию — дефолтный `DEAD_LOAD_SCRIPT`): для своих палитр/текстов/таймаута. */
   script?: string
   /* Видимость вкладки на старте (по умолчанию — видима). */
@@ -99,6 +101,7 @@ export function createPage(options: PageOptions = {}): Page {
     prefersLight = false,
     replaceThrows = false,
     noBody = false,
+    ssr = false,
     script: scriptText = DEAD_LOAD_SCRIPT,
     resourceTiming = 'available',
   } = options
@@ -114,6 +117,9 @@ export function createPage(options: PageOptions = {}): Page {
   openPages.push(window)
   const { document } = window
   document.documentElement.className = htmlClass
+  if (ssr) {
+    document.documentElement.setAttribute(SSR_MARKER_ATTR, '')
+  }
   document.body.innerHTML = '<div id="__nuxt"></div>'
   if (noBody) {
     document.body.remove()

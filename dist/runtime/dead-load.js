@@ -1,4 +1,5 @@
 import { buildInlineScreenHelpers } from "./inline-screen.js";
+import { LOAD_SCAN_HELPERS } from "./load-scan.js";
 import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from "./screen-config.js";
 export const DEAD_LOAD_SCRIPT_KEY = "stale-deploy-guard-dead-load";
 export const DEAD_LOAD_SCRIPT_PRIORITY = -1;
@@ -11,13 +12,13 @@ const DEFAULT_CONFIG = {
 export function buildDeadLoadScript(config = DEFAULT_CONFIG) {
   return String.raw`(function () {
 ${buildInlineScreenHelpers(config)}
+${LOAD_SCAN_HELPERS}
   var MARKER = 'sdg-retry';
+  var SSR_ATTR = 'data-sdg-ssr';
   var TIMEOUT_MS = CFG.loadTimeoutMs;
   var TICK_MS = 1000;
   var TICK_CAP_MS = TICK_MS * 2;
-  var PENDING_LIMIT = 5;
   var ERRORS_LIMIT = 3;
-  var PATH_LIMIT = 120;
   var MESSAGE_LIMIT = 200;
   var shared = sdgShared();
   var handled = false;
@@ -31,6 +32,10 @@ ${buildInlineScreenHelpers(config)}
   var watchdogTimer = null;
   var reported = false;
   var errors = [];
+  var ssr = false;
+  try {
+    ssr = doc.documentElement.hasAttribute(SSR_ATTR);
+  } catch (e) {}
 
   if (TIMEOUT_MS > 0) {
     try {
@@ -96,6 +101,10 @@ ${buildInlineScreenHelpers(config)}
   function report(now) {
     reported = true;
     stopWatchdog();
+    var scan = scanCritical();
+    if (ssr && !scan.stylePending) {
+      return;
+    }
     var elapsed = now - startedAt;
     var detail = {
       reason: 'load-timeout',
@@ -109,13 +118,12 @@ ${buildInlineScreenHelpers(config)}
       detail.kind = lastKind;
     }
     try {
-      describeLoad(detail);
+      describeLoad(detail, scan);
     } catch (e) {}
     sdgEmit('app:load-timeout', detail);
   }
 
-  function describeLoad(detail) {
-    var scan = scanCritical();
+  function describeLoad(detail, scan) {
     var readyState = String(doc.readyState);
     var nav = win.navigator;
     detail.stage = scan.pendingCount > 0 || readyState === 'loading' ? 'network' : 'boot';
@@ -129,92 +137,6 @@ ${buildInlineScreenHelpers(config)}
     detail.criticalCount = scan.criticalCount;
     detail.vueMounted = hasVueApp();
     detail.errors = errors;
-  }
-
-  function urlParts(value) {
-    var link = doc.createElement('a');
-    link.href = value;
-    return { host: link.host, path: (link.host + link.pathname).slice(0, PATH_LIMIT) };
-  }
-
-  function mediaMatches(media) {
-    try {
-      return !win.matchMedia || win.matchMedia(media).matches;
-    } catch (e) {
-      return true;
-    }
-  }
-
-  function isCritical(node) {
-    if (/^script$/i.test(node.tagName)) {
-      var classic = String(node.type).toLowerCase() !== 'module';
-      return !classic || !(node.async || node.hasAttribute('async') || node.hasAttribute('nomodule'));
-    }
-    var rel = String(node.getAttribute('rel') || '').toLowerCase().split(/\s+/);
-    if (rel.indexOf('modulepreload') >= 0) {
-      return true;
-    }
-    if (rel.indexOf('stylesheet') < 0 || rel.indexOf('alternate') >= 0) {
-      return false;
-    }
-    if (node.disabled || node.hasAttribute('disabled')) {
-      return false;
-    }
-    var media = node.getAttribute('media');
-    return !media || mediaMatches(media);
-  }
-
-  function loadedResources() {
-    try {
-      var perf = win.performance;
-      if (!perf || typeof perf.getEntriesByType !== 'function') {
-        return null;
-      }
-      var entries = perf.getEntriesByType('resource');
-      var loaded = {};
-      for (var i = 0; i < entries.length; i++) {
-        loaded[entries[i].name] = true;
-      }
-      return loaded;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function scanCritical() {
-    var scan = { criticalCount: 0, pending: [], pendingCount: 0, firstHost: '' };
-    try {
-      var loaded = loadedResources();
-      var nodes = doc.querySelectorAll('link[href], script[src]');
-      for (var i = 0; i < nodes.length; i++) {
-        var node = nodes[i];
-        if (!isCritical(node)) {
-          continue;
-        }
-        scan.criticalCount++;
-        var url = /^script$/i.test(node.tagName) ? node.src : node.href;
-        if (loaded === null || loaded[url] === true) {
-          continue;
-        }
-        scan.pendingCount++;
-        if (scan.pendingCount <= PENDING_LIMIT) {
-          var parts = urlParts(url);
-          scan.pending.push(parts.path);
-          if (scan.pendingCount === 1) {
-            scan.firstHost = parts.host;
-          }
-        }
-      }
-    } catch (e) {}
-    return scan;
-  }
-
-  function hasVueApp() {
-    try {
-      return !!doc.querySelector('[data-v-app]');
-    } catch (e) {
-      return false;
-    }
   }
 
   function noteError(message, filename, line, column) {
@@ -282,6 +204,9 @@ ${buildInlineScreenHelpers(config)}
     handled = true;
     var type = kind === 'entry' ? 'entry' : 'chunk';
     lastKind = type;
+    if (ssr) {
+      return;
+    }
     if (!hasMarker()) {
       try {
         present('loading');

@@ -59,6 +59,27 @@ async function scriptText(options: { dev: boolean; guard?: Record<string, unknow
   return innerHTML
 }
 
+const MODULE_RUNTIME = fileURLToPath(new URL('../../src/runtime/', import.meta.url))
+
+/* Плагины рантайма модуля, которые его setup зарегистрировал (`addPlugin` кладёт их в `nuxt.options.plugins`):
+   имя файла без расширения и режим. */
+async function modulePlugins(options: { dev: boolean }) {
+  const nuxt = await loadNuxt({
+    cwd: FIXTURE,
+    dev: options.dev,
+    overrides: { devtools: { enabled: false }, telemetry: false },
+  })
+  try {
+    return nuxt.options.plugins.flatMap((plugin) =>
+      typeof plugin !== 'string' && plugin.src.startsWith(MODULE_RUNTIME)
+        ? [{ file: plugin.src.slice(MODULE_RUNTIME.length).replace(/\.[cm]?[jt]s$/u, ''), mode: plugin.mode }]
+        : [],
+    )
+  } finally {
+    await nuxt.close()
+  }
+}
+
 describe('модуль — inline-скрипты первой загрузки в app.head.script', { timeout: 60_000 }, () => {
   it('прод: «страница не загрузилась» в head и проверка import maps в bodyClose, у каждого свой ключ дедупа', async () => {
     expect(await headScripts({ dev: false })).toEqual([DEAD_LOAD, IMPORTMAP_CHECK])
@@ -71,6 +92,16 @@ describe('модуль — inline-скрипты первой загрузки �
   it('прод: скрипты приложения сохраняются, скрипты модуля добавляются после них', async () => {
     const scripts = await headScripts({ dev: false, userScripts: [{ src: '/analytics.js' }] })
     expect(scripts).toEqual([{ src: '/analytics.js' }, DEAD_LOAD, IMPORTMAP_CHECK])
+  })
+})
+
+describe('модуль — серверный плагин метки SSR', { timeout: 60_000 }, () => {
+  it('прод: подключён серверным плагином (метку читает inline-скрипт, который есть только в проде)', async () => {
+    expect(await modulePlugins({ dev: false })).toContainEqual({ file: 'plugin.server', mode: 'server' })
+  })
+
+  it('dev: плагинов модуля нет — inline-скриптов нет, метка некому читать', async () => {
+    expect(await modulePlugins({ dev: true })).toEqual([])
   })
 })
 
