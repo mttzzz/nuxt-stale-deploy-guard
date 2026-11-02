@@ -110,7 +110,8 @@ export default defineNuxtModule<ModuleOptions>({
      * 5) Inline-скрипты первой загрузки — только прод: в dev import map нет, а экраны не должны реагировать на HMR.
      *    а) «Страница не загрузилась» (dead-load.ts, Sentry KP-MODMB-COM-1H): сбой чанка/entry ДО `app:mounted`
      *       оставлял вкладку мёртвой на 500 Nuxt — `nuxt:router` (enforce: 'pre') стартует первую навигацию раньше
-     *       клиентского плагина. Скрипт — одна автоперезагрузка с маркером `sdg-retry`, после повторного сбоя экран
+     *       клиентского плагина. Скрипт — одна автоперезагрузка с маркером `sdg-retry` (её тратит и reload guard'а:
+     *       страница, открытая им меньше cooldown'а назад, повтора не получает), после повторного сбоя экран
      *       с кнопкой «Обновить» и событие `retry-failed`. tagPosition head + числовой tagPriority: слушатели
      *       обязаны стоять в HTML РАНЬШЕ entry `<script type="module">`.
      *    б) Проверка import maps + экран для браузеров без них (iOS < 16.4: Nuxt 4.1+ кладёт entry в

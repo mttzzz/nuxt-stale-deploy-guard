@@ -48,14 +48,20 @@ export function setupPluginDeadLoad(): void {
   })
 }
 
-export function teardownPluginDeadLoad(): void {
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
+/* Выгрузка документа: слушатели плагина и скрипта, мост и экран уходят вместе с ним; sessionStorage вкладки (cooldown
+   guard'а, счётчик попыток) переживает перезагрузку и остаётся. Следующий `runScript`/`install` — уже новый документ. */
+export function unloadDocument(): void {
   for (const [type, listener, options] of added.splice(0)) {
     globalThis.removeEventListener(type, listener, options)
   }
   Reflect.deleteProperty(globalThis, DEAD_LOAD_GLOBAL)
   document.querySelector('[data-sdg-dead-load]')?.remove()
+}
+
+export function teardownPluginDeadLoad(): void {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  unloadDocument()
   Reflect.deleteProperty(globalThis.location, 'replace')
 }
 

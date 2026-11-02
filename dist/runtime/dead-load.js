@@ -1,3 +1,4 @@
+import { CHUNK_RELOAD_COOLDOWN_KEY, CHUNK_RELOAD_COOLDOWN_MS } from "./chunk-reload-guard.js";
 import { buildInlineScreenHelpers } from "./inline-screen.js";
 import { LOAD_SCAN_HELPERS } from "./load-scan.js";
 import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from "./screen-config.js";
@@ -14,6 +15,8 @@ export function buildDeadLoadScript(config = DEFAULT_CONFIG) {
 ${buildInlineScreenHelpers(config)}
 ${LOAD_SCAN_HELPERS}
   var MARKER = 'sdg-retry';
+  var COOLDOWN_KEY = ${JSON.stringify(CHUNK_RELOAD_COOLDOWN_KEY)};
+  var COOLDOWN_MS = ${String(CHUNK_RELOAD_COOLDOWN_MS)};
   var SSR_ATTR = 'data-sdg-ssr';
   var TIMEOUT_MS = CFG.loadTimeoutMs;
   var TICK_MS = 1000;
@@ -47,6 +50,16 @@ ${LOAD_SCAN_HELPERS}
 
   function hasMarker() {
     return new RegExp('[?&]' + MARKER + '(=|&|$)').test(win.location.search);
+  }
+
+  function guardReloadedRecently() {
+    try {
+      var raw = win.sessionStorage.getItem(COOLDOWN_KEY);
+      var last = raw ? Number(raw) : 0;
+      return isFinite(last) && Date.now() - last < COOLDOWN_MS;
+    } catch (e) {
+      return false;
+    }
   }
 
   function retryUrl(kind) {
@@ -207,7 +220,7 @@ ${LOAD_SCAN_HELPERS}
     if (ssr) {
       return;
     }
-    if (!hasMarker()) {
+    if (!hasMarker() && !guardReloadedRecently()) {
       try {
         present('loading');
       } catch (e) {}
