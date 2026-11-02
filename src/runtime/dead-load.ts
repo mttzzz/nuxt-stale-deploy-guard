@@ -1,3 +1,4 @@
+import { CHUNK_RELOAD_COOLDOWN_KEY, CHUNK_RELOAD_COOLDOWN_MS } from './chunk-reload-guard'
 import { buildInlineScreenHelpers, type InlineScreenConfig } from './inline-screen'
 import { LOAD_SCAN_HELPERS } from './load-scan'
 import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
@@ -36,6 +37,15 @@ import { DEFAULT_SCREEN_THEME, DEFAULT_SCREEN_TEXTS } from './screen-config'
  *      (`data-sdg-state="failed"`), без перезагрузки. Кнопка «Обновить» — `location.reload()`: маркер остаётся,
  *      одно нажатие = одна попытка. Если `location.replace` недоступен (бросает), скрипт сразу идёт на экран
  *      «не загрузилась». После успешного `app:mounted` плагин сам убирает из URL только ключ `sdg-retry`.
+ *      Автоповтор — ОДНА автоматическая перезагрузка на цепочку сбоя, и тратит её любой автоматический reload, а
+ *      не только свой: reload guard'а (chunk-reload-guard.ts) пишет в sessionStorage штамп
+ *      `chunk-reload:last-reload-at` ПЕРЕД перезагрузкой, и штамп переживает её. Скрипт читает штамп в момент сбоя:
+ *      моложе cooldown'а guard'а (10 с — те же ключ и порог, они вшиваются из его констант) значит «эту страницу
+ *      открыл guard», её автоповтор уже потрачен — сбой идёт сразу на экран «не загрузилась» с `retry-failed`, а
+ *      не на второй reload через долю секунды после первого (e2e ai.pushka.biz 35: «ровно один reload»). Штамп
+ *      отсутствует, не число, старше cooldown'а или sessionStorage недоступен (SecurityError в WebView) —
+ *      автоповтор как обычно. Экран на таком адресе показан БЕЗ маркера `sdg-retry`: «Обновить» — обычная
+ *      перезагрузка, а следующая загрузка идёт по правилам первой.
  *   5. Событие `app:chunk-reload-blocked` с `RetryFailedBlockedDetail`
  *      (`{ reason: 'retry-failed', kind, error?, url? }`, контракт — chunk-reload-guard.ts) — ровно один раз
  *      за загрузку страницы, при достижении экрана «не загрузилась». Для первого (автоповторяемого) сбоя
@@ -130,6 +140,8 @@ export function buildDeadLoadScript(config: InlineScreenConfig = DEFAULT_CONFIG)
 ${buildInlineScreenHelpers(config)}
 ${LOAD_SCAN_HELPERS}
   var MARKER = 'sdg-retry';
+  var COOLDOWN_KEY = ${JSON.stringify(CHUNK_RELOAD_COOLDOWN_KEY)};
+  var COOLDOWN_MS = ${String(CHUNK_RELOAD_COOLDOWN_MS)};
   var SSR_ATTR = 'data-sdg-ssr';
   var TIMEOUT_MS = CFG.loadTimeoutMs;
   var TICK_MS = 1000;
@@ -163,6 +175,16 @@ ${LOAD_SCAN_HELPERS}
 
   function hasMarker() {
     return new RegExp('[?&]' + MARKER + '(=|&|$)').test(win.location.search);
+  }
+
+  function guardReloadedRecently() {
+    try {
+      var raw = win.sessionStorage.getItem(COOLDOWN_KEY);
+      var last = raw ? Number(raw) : 0;
+      return isFinite(last) && Date.now() - last < COOLDOWN_MS;
+    } catch (e) {
+      return false;
+    }
   }
 
   function retryUrl(kind) {
@@ -323,7 +345,7 @@ ${LOAD_SCAN_HELPERS}
     if (ssr) {
       return;
     }
-    if (!hasMarker()) {
+    if (!hasMarker() && !guardReloadedRecently()) {
       try {
         present('loading');
       } catch (e) {}

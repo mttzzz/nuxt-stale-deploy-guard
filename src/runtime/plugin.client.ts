@@ -25,7 +25,9 @@ import { isStaleChunkError } from './stale-chunk'
  *
  * Сбой чанка ДО `app:mounted` (pre-mount) ведёт не guard, а inline-скрипт `dead-load.ts` из head: мост
  * `window.__sdgDeadLoad` (`dead-load-bridge.ts`) принимает `fail('chunk', error)` из тех же каналов и решает
- * сразу, без HEAD-проб — автоповтор страницы с маркером `sdg-retry` либо экран «Страница не загрузилась».
+ * сразу, без HEAD-проб — автоповтор страницы с маркером `sdg-retry` либо экран «Страница не загрузилась» (экран и
+ * тогда, когда страницу только что открыл reload самого guard'а: его cooldown в sessionStorage — это уже потраченный
+ * автоповтор, второго reload не будет).
  * Зачем: `nuxt:router` (enforce: 'pre') стартует первую навигацию раньше этого плагина, и транзитный сбой
  * первого чанка оставлял вкладку мёртвой на странице ошибки Nuxt. На `app:mounted` плагин сообщает мосту
  * `mounted()` и убирает из URL ключ `sdg-retry` (`router.replace`, прочие query и hash на месте); с этого
