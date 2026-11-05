@@ -12,7 +12,8 @@ export interface NotStaleBlockedDetail {
     probes: string[];
     buildId: string;
 }
-/** Реактивная верификация хотела reload, circuit breaker запретил. */
+/** Reload хотели реактивная верификация или упавший переход, circuit breaker запретил.
+ *  У перехода проб нет: `probes: []`. */
 export interface CircuitBreakerBlockedDetail {
     reason: 'circuit-breaker';
     error: unknown;
@@ -21,8 +22,8 @@ export interface CircuitBreakerBlockedDetail {
     attempts: number;
     windowMs: number;
 }
-/** Реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на НОВОЙ странице
- *  (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
+/** Реактивная верификация или reload упавшего перехода пропущены: идёт cooldown после reload, а чанк упал уже на НОВОЙ
+ *  странице (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
 export interface CooldownBlockedDetail {
     reason: 'cooldown';
     error: unknown;
@@ -124,7 +125,7 @@ export interface LoadTimeoutDetail {
 }
 export interface ChunkReloadDeps {
     getBuildId: () => string;
-    reload: () => void;
+    reload: (path?: string) => void;
     fetchServerBuildId: (path: string, attempt?: number) => Promise<string>;
     now: () => number;
     sleep?: (ms: number) => Promise<void>;
@@ -135,5 +136,6 @@ export interface ChunkReloadGuard {
     verifyAndReload: (path?: string, error?: unknown) => Promise<void>;
     verifyConvergedAndReload: (path?: string) => Promise<void>;
     handleStaleChunkError: (err: unknown, path?: string) => void;
+    handleFailedNavigation: (err: unknown, target: string) => void;
 }
 export declare function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard;

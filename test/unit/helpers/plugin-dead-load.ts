@@ -5,7 +5,7 @@ import { vi } from 'vitest'
 import { DEAD_LOAD_SCRIPT } from '../../../src/runtime/dead-load'
 import { DEAD_LOAD_GLOBAL } from '../../../src/runtime/dead-load-bridge'
 import plugin from '../../../src/runtime/plugin.client'
-import { nuxtStub } from '../stubs/nuxt-app'
+import { clearNavigationErrorHandlers, nuxtStub } from '../stubs/nuxt-app'
 
 /*
  * Оснастка unit-тестов клиентского плагина и inline-скрипта «страница не загрузилась» (dead-load.ts):
@@ -36,6 +36,7 @@ const added: Parameters<typeof globalThis.addEventListener>[] = []
 /* Сброс заглушек Nuxt + шпион на addEventListener: слушатели висят на window, их надо снять после теста. */
 export function setupPluginDeadLoad(): void {
   nuxtStub.config.app.buildId = 'build-a'
+  nuxtStub.config.app.baseURL = '/'
   nuxtStub.config.public.staleDeployGuard.pollIntervalMs = 0
   nuxtStub.router.currentRoute.value = { path: '/invite/abc', query: {}, hash: '' }
   nuxtStub.router.replace.mockClear()
@@ -48,12 +49,14 @@ export function setupPluginDeadLoad(): void {
   })
 }
 
-/* Выгрузка документа: слушатели плагина и скрипта, мост и экран уходят вместе с ним; sessionStorage вкладки (cooldown
-   guard'а, счётчик попыток) переживает перезагрузку и остаётся. Следующий `runScript`/`install` — уже новый документ. */
+/* Выгрузка документа: слушатели плагина и скрипта (на window и на роутере), мост и экран уходят вместе с ним;
+   sessionStorage вкладки (cooldown guard'а, счётчик попыток) переживает перезагрузку и остаётся. Следующий
+   `runScript`/`install` — уже новый документ. */
 export function unloadDocument(): void {
   for (const [type, listener, options] of added.splice(0)) {
     globalThis.removeEventListener(type, listener, options)
   }
+  clearNavigationErrorHandlers()
   Reflect.deleteProperty(globalThis, DEAD_LOAD_GLOBAL)
   document.querySelector('[data-sdg-dead-load]')?.remove()
 }
