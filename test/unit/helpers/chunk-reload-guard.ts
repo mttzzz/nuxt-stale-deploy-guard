@@ -56,7 +56,7 @@ export interface GuardSetupOpts {
 export function setup(opts: GuardSetupOpts = {}) {
   const { buildId = 'v1', serverId = 'v2', fetchFails = false, emptyServerId = false } = opts
 
-  const reload = vi.fn<() => void>()
+  const reload = vi.fn<(path?: string) => void>()
   const dispatchBlocked = vi.fn<(detail: ChunkReloadBlockedDetail) => void>()
   const storage = opts.storage ?? createFakeStorage()
   const nowSpy = vi.fn(() => Date.now())
@@ -87,7 +87,7 @@ export function setup(opts: GuardSetupOpts = {}) {
 
 /* Guard с очередью ответов проб (`answers` по порядку, дальше — упавшие пробы) — для вердикта по схождению флота. */
 export function setupConverged(answers: string[], buildId = 'v1') {
-  const reload = vi.fn<() => void>()
+  const reload = vi.fn<(path?: string) => void>()
   const dispatchBlocked = vi.fn<(detail: ChunkReloadBlockedDetail) => void>()
   const queue = [...answers]
   const fetchServerBuildId = vi.fn(() => {

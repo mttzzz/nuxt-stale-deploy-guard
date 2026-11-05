@@ -64,9 +64,18 @@ event-shape, имеющим `breadcrumbs`.
   серия HEAD-проб на текущий путь (4 через 400 мс, cache-buster `sdg-probe`) → если ХОТЬ ОДНА
   увидела чужой build-id → reload через `reloadNuxtApp`. Reload только по доказательству, что
   вкладка сломана: работающую вкладку модуль сам не перезагружает.
+- Переход на маршрут, упавший после монтирования на загрузке чанка (`router.onError`: `Couldn't resolve component`
+  или исходная ошибка импорта), сразу перезагружает вкладку на цель перехода (`reloadNuxtApp({ path })`, путь с
+  `app.baseURL`) — без HEAD-проб и при любом build-id. Так поступает и штатный reload Nuxt
+  (`experimental.emitRouteChunkError: 'automatic'`), но он узнаёт только ошибки из `app:chunkError`, а guard гасит
+  `vite:preloadError`, и Vite-хелпер отдаёт роутеру `undefined` вместо ошибки. До 0.9.2 такой переход оставался немым
+  кликом: Chromium до 155 включительно держит упавший `import()` в module map документа до перезагрузки, и ссылка не
+  открывалась до F5 (Sentry AI-PUSHKA-BIZ-8Q: VPN оборвал prefetch чанка). Cooldown и circuit breaker — общие с
+  верификацией. Сбой чанка без перехода (prefetch, async-компонент) — как раньше: пробы и вердикт.
 - Ошибку загрузки чанка guard глотает (`preventDefault`), поэтому каждый исход «перезагрузки не будет» —
   build-id совпал на всех пробах, cooldown, circuit breaker, нет build-id — он сообщает событием
   `app:chunk-reload-blocked` с исходной ошибкой (см. ниже). Иначе вкладка остаётся мёртвой, а в Sentry тишина.
+  У упавшего перехода исходов «перезагрузки не будет» два: cooldown и circuit breaker.
 - Cooldown 10s + circuit breaker (3 попытки в 5 мин): при срабатывании reload не случается, а событие
   `app:chunk-reload-blocked` называет причину.
 - Опциональный проактивный poll (`pollIntervalMs > 0`): та же серия проб, но reload только когда
@@ -103,19 +112,19 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 
 `detail` — объединение по `reason`:
 
-| `reason`              | Когда                                                                                                       | Поля                                                                 |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем                    | `error`, `probes: string[]`, `buildId: string`                       |
-| `circuit-breaker`     | реактивная верификация хотела reload, circuit breaker запретил                                              | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
-| `cooldown`            | реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на новой странице             | `error`, `buildId`                                                   |
-| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                                    | `error`                                                              |
-| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                                   | `missing: 'importmap'`                                               |
-| `retry-failed`        | inline-скрипт: страница не загрузилась до `app:mounted` и после автоповтора (см. «Мёртвая первая загрузка») | `kind: 'chunk' \| 'entry'`, `error?`, `url?`                         |
+| `reason`              | Когда                                                                                                                        | Поля                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `not-stale`           | реактивная верификация: ни одна проба не увидела чужой build-id — чанк сломан не деплоем                                     | `error`, `probes: string[]`, `buildId: string`                       |
+| `circuit-breaker`     | реактивная верификация или упавший переход хотели reload, circuit breaker запретил (у перехода `probes: []`)                 | `error`, `probes`, `buildId`, `attempts: number`, `windowMs: number` |
+| `cooldown`            | реактивная верификация или reload упавшего перехода пропущены: идёт cooldown после reload, а чанк упал уже на новой странице | `error`, `buildId`                                                   |
+| `no-build-id`         | реактивная верификация пропущена: у клиента нет build-id                                                                     | `error`                                                              |
+| `unsupported-browser` | inline-скрипт: браузер без import maps, приложение не стартует (см. ниже)                                                    | `missing: 'importmap'`                                               |
+| `retry-failed`        | inline-скрипт: страница не загрузилась до `app:mounted` и после автоповтора (см. «Мёртвая первая загрузка»)                  | `kind: 'chunk' \| 'entry'`, `error?`, `url?`                         |
 
 `error` — исходная ошибка/значение, запустившее верификацию: payload `vite:preloadError`, `reason`
 `unhandledrejection`, `error ?? message` события `error`, ошибка `vue:error`/`app:error`, `error` из хука
-`app:chunkError` (`{ error }`). Ключ есть всегда, значение может быть `undefined`. `probes` — build-id каждой
-пробы (пустая строка — проба упала или ответила без заголовка).
+`app:chunkError` (`{ error }`), ошибка `router.onError` у упавшего перехода. Ключ есть всегда, значение может быть
+`undefined`. `probes` — build-id каждой пробы (пустая строка — проба упала или ответила без заголовка).
 
 У `retry-failed`: `kind` — что не загрузилось (`'chunk'` — чанк страницы, динамический импорт; `'entry'` —
 `<script type="module" src>` точки входа); `error` — payload `vite:preloadError` или ошибка из хука/слушателя
@@ -130,6 +139,7 @@ globalThis.addEventListener('app:chunk-reload-blocked', (event) => {
 Событие НЕ шлётся:
 
 - при reload — вкладку лечит сам reload;
+- вердиктом серии проб, если, пока она шла, упавший переход уже перезагрузил вкладку на свою цель;
 - когда вызов упёрся в идущую верификацию (`verifyInFlight`): свой исход отправит она;
 - в cooldown страницы, которая сама вызвала reload: вкладка доживает до выгрузки, и хвостовые ошибки чанков —
   ещё старая страница (иначе каждая устаревшая вкладка слала бы событие на каждом деплое);
@@ -201,15 +211,16 @@ module» и не убирает страницу ошибки (`clearError` в `
 слушатели готовы до того, как entry начнёт грузиться.
 
 Область — только сбои ДО `app:mounted`. После монтирования всё работает как раньше: HEAD-пробы,
-verify-before-reload, события `not-stale` / `circuit-breaker` / `cooldown` / `no-build-id`.
+verify-before-reload, reload упавшего перехода на цель, события `not-stale` / `circuit-breaker` / `cooldown` /
+`no-build-id`.
 
 Триггеры (первый сбой за загрузку страницы побеждает, остальные игнорируются):
 
-| Источник                                                                                                                                             | `kind`  |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| событие window `vite:preloadError`                                                                                                                   | `chunk` |
-| сбой в хуках и слушателях клиентского плагина: `app:chunkError`, `app:error`, `vue:error`, `unhandledrejection`, `error` (тот же фильтр stale-chunk) | `chunk` |
-| `error`, пойманный на window в фазе capture, цель которого — `<script type="module" src>`                                                            | `entry` |
+| Источник                                                                                                                                                               | `kind`  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| событие window `vite:preloadError`                                                                                                                                     | `chunk` |
+| сбой в хуках и слушателях клиентского плагина: `app:chunkError`, `app:error`, `vue:error`, `unhandledrejection`, `error`, `router.onError` (тот же фильтр stale-chunk) | `chunk` |
+| `error`, пойманный на window в фазе capture, цель которого — `<script type="module" src>`                                                                              | `entry` |
 
 Ошибки `<link>` (modulepreload, stylesheet) игнорируются. HEAD-проб нет: скрипт реагирует сразу.
 
@@ -258,12 +269,13 @@ kubernetes.container_name:=envoy "x-envoy-origin-path":~"sdg-retry=" | extract_r
 `src/runtime/dead-load-bridge.ts`. Моста нет (dev, старый кешированный HTML) — плагин работает как раньше.
 
 После автоповтора или экрана «Страница не загрузилась» клиентский плагин молчит до конца жизни документа: все
-каналы (`vite:preloadError`, `app:chunkError`, `vue:error`, `app:error`, `unhandledrejection`, `error`) и poll не
-делают ничего, `app:mounted` не убирает маркер `sdg-retry`. Зачем: уходящий документ живёт ещё секунды после
-автоповтора, а навигация обрывает загрузку CSS его страницы ошибки — сбой доходит до guard уже после монтирования,
-пробы не доходят до сервера, build-id совпадает, и в Sentry уходит ложный «билд актуален» (`not-stale`) от
-документа, который уже умер (Sentry KP-MODMB-COM-1H, 21.10.2026). Второе следствие — маркер `sdg-retry` остаётся
-в адресе: кнопка «Обновить» на экране перезагружает страницу С маркером, одно нажатие = одна попытка.
+каналы (`vite:preloadError`, `app:chunkError`, `vue:error`, `app:error`, `unhandledrejection`, `error`,
+`router.onError`) и poll не делают ничего, `app:mounted` не убирает маркер `sdg-retry`. Зачем: уходящий документ
+живёт ещё секунды после автоповтора, а навигация обрывает загрузку CSS его страницы ошибки — сбой доходит до guard
+уже после монтирования, пробы не доходят до сервера, build-id совпадает, и в Sentry уходит ложный «билд актуален»
+(`not-stale`) от документа, который уже умер (Sentry KP-MODMB-COM-1H, 21.10.2026). Второе следствие — маркер
+`sdg-retry` остаётся в адресе: кнопка «Обновить» на экране перезагружает страницу С маркером, одно нажатие = одна
+попытка.
 
 Ограничения:
 

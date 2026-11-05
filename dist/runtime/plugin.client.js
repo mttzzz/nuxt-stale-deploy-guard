@@ -44,8 +44,10 @@ export default defineNuxtPlugin((nuxtApp) => {
   let mounted = false;
   const guard = createChunkReloadGuard({
     getBuildId: () => typeof config.app.buildId === "string" ? config.app.buildId : "",
-    reload: () => {
-      reloadNuxtApp({ force: true, persistState: true });
+    reload: (path) => {
+      reloadNuxtApp(
+        path === void 0 ? { force: true, persistState: true } : { path, force: true, persistState: true }
+      );
     },
     fetchServerBuildId: makeFetchServerBuildId(opts.buildIdHeader),
     now: () => Date.now(),
@@ -105,6 +107,15 @@ export default defineNuxtPlugin((nuxtApp) => {
       return;
     }
     guard.handleStaleChunkError(error);
+  });
+  router.onError((error, to) => {
+    if (deadLoadHandled() || !isStaleChunkError(error)) {
+      return;
+    }
+    if (handOverBeforeMount(error)) {
+      return;
+    }
+    guard.handleFailedNavigation(error, `${config.app.baseURL.replace(/\/+$/u, "")}${to.fullPath}`);
   });
   nuxtApp.hook("app:mounted", () => {
     mounted = true;

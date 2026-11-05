@@ -14,7 +14,16 @@ function defaultSleep(ms) {
 }
 export function createChunkReloadGuard(deps) {
   let verifyInFlight = false;
-  let reloadRequested = false;
+  let reloadRequestedAt = null;
+  function requestReload(target) {
+    markReloadNow();
+    reloadRequestedAt = deps.now();
+    if (target === void 0) {
+      deps.reload();
+    } else {
+      deps.reload(target);
+    }
+  }
   function inCooldown() {
     const raw = deps.storage.getItem(CHUNK_RELOAD_COOLDOWN_KEY);
     const last = raw ? Number(raw) : 0;
@@ -70,7 +79,7 @@ export function createChunkReloadGuard(deps) {
       return;
     }
     if (inCooldown()) {
-      if (!reloadRequested) {
+      if (reloadRequestedAt === null) {
         reportBlocked?.({ reason: "cooldown", buildId: currentBuildId });
       }
       return;
@@ -78,9 +87,13 @@ export function createChunkReloadGuard(deps) {
     if (verifyInFlight) {
       return;
     }
+    const startedAt = deps.now();
     verifyInFlight = true;
     try {
       const probes = await collectProbes(path, stopOnMismatch, currentBuildId);
+      if (reloadRequestedAt !== null && reloadRequestedAt >= startedAt) {
+        return;
+      }
       if (!decide(probes, currentBuildId)) {
         reportBlocked?.({ reason: "not-stale", probes, buildId: currentBuildId });
         return;
@@ -96,9 +109,7 @@ export function createChunkReloadGuard(deps) {
         });
         return;
       }
-      markReloadNow();
-      reloadRequested = true;
-      deps.reload();
+      requestReload();
     } finally {
       verifyInFlight = false;
     }
@@ -128,11 +139,39 @@ export function createChunkReloadGuard(deps) {
       void verifyAndReload(path, err);
     }
   }
+  function handleFailedNavigation(err, target) {
+    if (!isStaleChunkError(err)) {
+      return;
+    }
+    const buildId = deps.getBuildId();
+    if (inCooldown()) {
+      if (reloadRequestedAt === null) {
+        deps.dispatchBlocked({ reason: "cooldown", error: err, buildId });
+      }
+      return;
+    }
+    const attempts = recordAttemptAndCount();
+    if (attempts > CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS) {
+      deps.dispatchBlocked({
+        reason: "circuit-breaker",
+        error: err,
+        probes: [],
+        buildId,
+        attempts,
+        windowMs: CHUNK_RELOAD_CIRCUIT_WINDOW_MS
+      });
+      return;
+    }
+    requestReload(target);
+  }
   return {
     verifyAndReload: (path, error) => verifyAndReload(path ?? "", error),
     verifyConvergedAndReload: (path) => verifyConvergedAndReload(path ?? ""),
     handleStaleChunkError: (err, path) => {
       handleStaleChunkError(err, path ?? "");
+    },
+    handleFailedNavigation: (err, target) => {
+      handleFailedNavigation(err, target);
     }
   };
 }

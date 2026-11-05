@@ -24,6 +24,14 @@ import { isStaleChunkError } from './stale-chunk'
  *     (вкладка работает), поэтому событий НЕ шлёт ни при каком исходе, включая circuit breaker.
  *   - `handleStaleChunkError(err, path)` — фильтрует известные stale-chunk паттерны
  *     и триггерит verifyAndReload, передавая исходную ошибку.
+ *   - `handleFailedNavigation(err, target)` — переход на маршрут упал на чанке (`router.onError`): reload СРАЗУ на
+ *     целевой маршрут, без проб и при любом build-id. Вкладка уже доказанно сломана, и вердикт её не лечит: Chromium
+ *     запоминает упавший `import()` в module map документа до конца его жизни и повторно чанк не запрашивает, а
+ *     плагин глотает `vite:preloadError` (`preventDefault`) — Vite-хелпер отдаёт `undefined`, vue-router падает
+ *     `Couldn't resolve component`, и штатный reload Nuxt (`emitRouteChunkError: 'automatic'`) не срабатывает: его
+ *     `chunkErrors` этой ошибки не знают. Без reload ссылка мертва до F5 (Sentry AI-PUSHKA-BIZ-8Q, 05.11.2026: VPN
+ *     оборвал prefetch чанка, `not-stale`, и переход по этой ссылке в той же вкладке уже не открылся бы). Cooldown и
+ *     circuit breaker — общие с верификацией; идущая верификация того же сбоя после этого reload вердикт не выносит.
  *   - Cooldown (10s) + verifyInFlight защищают от параллельных вызовов/race'ов. Cooldown, начатый ЭТОЙ
  *     страницей, событий не шлёт: reload уже вызван, вкладка доживает до выгрузки (навигация не мгновенна),
  *     и хвостовые ошибки чанков в этом окне — ещё старая страница. Иначе каждая устаревшая вкладка на
@@ -73,7 +81,8 @@ export interface NotStaleBlockedDetail {
   buildId: string
 }
 
-/** Реактивная верификация хотела reload, circuit breaker запретил. */
+/** Reload хотели реактивная верификация или упавший переход, circuit breaker запретил.
+ *  У перехода проб нет: `probes: []`. */
 export interface CircuitBreakerBlockedDetail {
   reason: 'circuit-breaker'
   error: unknown
@@ -83,8 +92,8 @@ export interface CircuitBreakerBlockedDetail {
   windowMs: number
 }
 
-/** Реактивная верификация пропущена: идёт cooldown после reload, а чанк упал уже на НОВОЙ странице
- *  (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
+/** Реактивная верификация или reload упавшего перехода пропущены: идёт cooldown после reload, а чанк упал уже на НОВОЙ
+ *  странице (cooldown пережил reload в sessionStorage). На странице, которая сама вызвала reload, — тишина. */
 export interface CooldownBlockedDetail {
   reason: 'cooldown'
   error: unknown
@@ -208,7 +217,9 @@ type ReportBlocked = (fields: DistributiveOmit<ChunkReloadBlockedDetail, 'error'
 
 export interface ChunkReloadDeps {
   getBuildId: () => string
-  reload: () => void
+  /* Reload вкладки. `path` — куда, полный путь с baseURL (как `reloadNuxtApp({ path })`): цель упавшего перехода.
+     Без него — текущая страница. */
+  reload: (path?: string) => void
   fetchServerBuildId: (path: string, attempt?: number) => Promise<string>
   now: () => number
   /* Пауза между пробами; инъектится в тестах. По умолчанию — реальный setTimeout. */
@@ -222,6 +233,7 @@ export interface ChunkReloadGuard {
   verifyAndReload: (path?: string, error?: unknown) => Promise<void>
   verifyConvergedAndReload: (path?: string) => Promise<void>
   handleStaleChunkError: (err: unknown, path?: string) => void
+  handleFailedNavigation: (err: unknown, target: string) => void
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -233,8 +245,22 @@ function defaultSleep(ms: number): Promise<void> {
 
 export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard {
   let verifyInFlight = false
-  /* Reload вызван этой страницей: до выгрузки её cooldown — не повод для `cooldown` (см. шапку файла). */
-  let reloadRequested = false
+  /* Когда эта страница вызвала reload (`deps.now()`), `null` — не вызывала. До выгрузки её cooldown — не повод для
+     `cooldown`, а вердикт серии проб, начатой до reload, уже не нужен (см. шапку файла). Не вечный флаг: если reload
+     не состоялся (пользователь отменил `beforeunload`), после cooldown страница снова лечится как обычно. */
+  let reloadRequestedAt: number | null = null
+
+  /* Reload вкладки этой страницей: штамп cooldown'а, отметка времени, сам reload — на `target` (цель упавшего
+     перехода) или текущую страницу. */
+  function requestReload(target?: string): void {
+    markReloadNow()
+    reloadRequestedAt = deps.now()
+    if (target === undefined) {
+      deps.reload()
+    } else {
+      deps.reload(target)
+    }
+  }
 
   function inCooldown(): boolean {
     const raw = deps.storage.getItem(CHUNK_RELOAD_COOLDOWN_KEY)
@@ -305,7 +331,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
       return
     }
     if (inCooldown()) {
-      if (!reloadRequested) {
+      if (reloadRequestedAt === null) {
         reportBlocked?.({ reason: 'cooldown', buildId: currentBuildId })
       }
       return
@@ -314,9 +340,15 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
       return
     }
 
+    const startedAt = deps.now()
     verifyInFlight = true
     try {
       const probes = await collectProbes(path, stopOnMismatch, currentBuildId)
+      /* Пока шли пробы, эта страница уже вызвала reload — упавший переход того же сбоя (`handleFailedNavigation`):
+         вердикт уходящей страницы не нужен — ни события, ни второго reload. */
+      if (reloadRequestedAt !== null && reloadRequestedAt >= startedAt) {
+        return
+      }
       if (!decide(probes, currentBuildId)) {
         reportBlocked?.({ reason: 'not-stale', probes, buildId: currentBuildId })
         return
@@ -334,9 +366,7 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
         return
       }
 
-      markReloadNow()
-      reloadRequested = true
-      deps.reload()
+      requestReload()
     } finally {
       verifyInFlight = false
     }
@@ -370,11 +400,40 @@ export function createChunkReloadGuard(deps: ChunkReloadDeps): ChunkReloadGuard 
     }
   }
 
+  function handleFailedNavigation(err: unknown, target: string): void {
+    if (!isStaleChunkError(err)) {
+      return
+    }
+    const buildId = deps.getBuildId()
+    if (inCooldown()) {
+      if (reloadRequestedAt === null) {
+        deps.dispatchBlocked({ reason: 'cooldown', error: err, buildId })
+      }
+      return
+    }
+    const attempts = recordAttemptAndCount()
+    if (attempts > CHUNK_RELOAD_CIRCUIT_MAX_ATTEMPTS) {
+      deps.dispatchBlocked({
+        reason: 'circuit-breaker',
+        error: err,
+        probes: [],
+        buildId,
+        attempts,
+        windowMs: CHUNK_RELOAD_CIRCUIT_WINDOW_MS,
+      })
+      return
+    }
+    requestReload(target)
+  }
+
   return {
     verifyAndReload: (path?: string, error?: unknown) => verifyAndReload(path ?? '', error),
     verifyConvergedAndReload: (path?: string) => verifyConvergedAndReload(path ?? ''),
     handleStaleChunkError: (err: unknown, path?: string) => {
       handleStaleChunkError(err, path ?? '')
+    },
+    handleFailedNavigation: (err: unknown, target: string) => {
+      handleFailedNavigation(err, target)
     },
   }
 }

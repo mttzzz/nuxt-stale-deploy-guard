@@ -23,6 +23,11 @@ import { isStaleChunkError } from './stale-chunk'
  * `app:chunkError`): с ней guard шлёт событие `app:chunk-reload-blocked` на каждый исход «reload не
  * случится» — подробности в chunk-reload-guard.ts.
  *
+ * Упавший ПЕРЕХОД на маршрут (`router.onError` с ошибкой загрузки чанка во вкладке, уже смонтированной) — отдельный
+ * исход: guard сразу перезагружает вкладку на цель перехода (`handleFailedNavigation`, без проб), путь — baseURL +
+ * `to.fullPath`, как у штатного reload Nuxt (`chunk-reload.client`). Зачем — chunk-reload-guard.ts. До монтирования
+ * такой сбой, как и любой другой, уходит мосту inline-скрипта.
+ *
  * Сбой чанка ДО `app:mounted` (pre-mount) ведёт не guard, а inline-скрипт `dead-load.ts` из head: мост
  * `window.__sdgDeadLoad` (`dead-load-bridge.ts`) принимает `fail('chunk', error)` из тех же каналов и решает
  * сразу, без HEAD-проб — автоповтор страницы с маркером `sdg-retry` либо экран «Страница не загрузилась» (экран и
@@ -97,8 +102,10 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   const guard = createChunkReloadGuard({
     getBuildId: () => (typeof config.app.buildId === 'string' ? config.app.buildId : ''),
-    reload: () => {
-      reloadNuxtApp({ force: true, persistState: true })
+    reload: (path) => {
+      reloadNuxtApp(
+        path === undefined ? { force: true, persistState: true } : { path, force: true, persistState: true },
+      )
     },
     fetchServerBuildId: makeFetchServerBuildId(opts.buildIdHeader),
     now: () => Date.now(),
@@ -172,6 +179,20 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     guard.handleStaleChunkError(error)
+  })
+  /* Переход на маршрут упал на чанке. После `preventDefault` на `vite:preloadError` (ниже) Vite-хелпер отдаёт
+     `undefined`, и vue-router бросает `Couldn't resolve component` (импорт без хелпера — исходный TypeError). Повторный
+     импорт в этом документе упадёт мгновенно (module map), а штатный reload Nuxt эту ошибку не узнаёт: без reload
+     ссылка мертва до F5. */
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- vue-router API требует колбэк, не awaitable
+  router.onError((error: unknown, to: { fullPath: string }) => {
+    if (deadLoadHandled() || !isStaleChunkError(error)) {
+      return
+    }
+    if (handOverBeforeMount(error)) {
+      return
+    }
+    guard.handleFailedNavigation(error, `${config.app.baseURL.replace(/\/+$/u, '')}${to.fullPath}`)
   })
   nuxtApp.hook('app:mounted', () => {
     mounted = true
