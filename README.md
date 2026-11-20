@@ -8,8 +8,10 @@ HTML, который ссылается на удалённые `/_nuxt/<hash>.j
 ## Установка
 
 ```bash
-bun add github:mttzzz/nuxt-stale-deploy-guard#v0.1.0
+bun add github:mttzzz/nuxt-stale-deploy-guard#main
 ```
+
+Пакет ставится с GitHub, `dist/` лежит в git. В `bun.lock` фиксируется коммит; `bun update @mttzzz/nuxt-stale-deploy-guard` берёт новую `main`. Релизы помечены тегами `vX.Y.Z`.
 
 ## Использование
 
@@ -582,7 +584,7 @@ bun install
 bun run dev:prepare    # генерит .nuxt/ и dist stub
 bun run dev            # playground на localhost:3000
 bun run test           # unit (vitest + happy-dom) и e2e (сборка фикстур Nuxt)
-bun run prepack        # билд dist/ через @nuxt/module-builder
+bun run prepack        # билд dist/ через @nuxt/module-builder; dist/ коммитится вместе с правкой src/ (CI сверяет)
 ```
 
 ## License
